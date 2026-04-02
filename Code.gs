@@ -5,7 +5,8 @@
 
 const SHEET_NAME          = "Entries";
 const SETTINGS_SHEET_NAME = "Settings";
-const HEADERS = ["id", "date", "format", "result", "notes", "g1", "g2", "g3", "g4", "g5"];
+// wins/losses appended at end (cols 11–12) for backwards compatibility with older rows
+const HEADERS = ["id", "date", "format", "result", "notes", "g1", "g2", "g3", "g4", "g5", "wins", "losses"];
 
 // ─── Sheet helpers ────────────────────────────────────────────────────────────
 
@@ -64,6 +65,8 @@ function doGet(e) {
       result: r[3],
       notes:  r[4],
       goals:  [r[5], r[6], r[7], r[8], r[9]].map(v => v === true || v === "TRUE"),
+      wins:   (r[10] !== "" && r[10] !== undefined) ? Number(r[10]) : null,
+      losses: (r[11] !== "" && r[11] !== undefined) ? Number(r[11]) : null,
     }));
 
   const settingsSheet = getSettingsSheet();
@@ -89,15 +92,17 @@ function doPost(e) {
 
   if (body.action === "create") {
     const en = body.entry;
-    sheet.appendRow([en.id, en.date, en.format, en.result, en.notes, ...en.goals]);
+    sheet.appendRow([en.id, en.date, en.format, en.result, en.notes, ...en.goals,
+                     en.wins ?? "", en.losses ?? ""]);
 
   } else if (body.action === "update") {
     const rows = sheet.getDataRange().getValues();
     for (let i = 1; i < rows.length; i++) {
       if (String(rows[i][0]) === String(body.entry.id)) {
         const en = body.entry;
-        sheet.getRange(i + 1, 1, 1, 10).setValues([
-          [en.id, en.date, en.format, en.result, en.notes, ...en.goals]
+        sheet.getRange(i + 1, 1, 1, 12).setValues([
+          [en.id, en.date, en.format, en.result, en.notes, ...en.goals,
+           en.wins ?? "", en.losses ?? ""]
         ]);
         break;
       }

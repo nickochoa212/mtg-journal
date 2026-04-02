@@ -24,11 +24,10 @@ const DEFAULT_FORMATS = [
   { name: "Cube",           active: true },
 ];
 
-const RESULTS = ["Win", "Lose", "Draw"];
-const TABS    = ["Daily", "History", "Settings"];
+const TABS = ["Daily", "History", "Settings"];
 
-// Shared result styling used by Badge, HistoryTab filter pills, and LogForm
-// result buttons. `border` is the accent ring color for the selected state.
+// Shared result styling used by Badge, HistoryTab filter pills, and LogForm.
+// `border` is the accent ring color for the selected state on interactive pills.
 const RESULT_STYLE = {
   Win:  { background: "#d1fae5", color: "#065f46", border: "#059669" },
   Lose: { background: "#fee2e2", color: "#991b1b", border: "#dc2626" },
@@ -86,6 +85,29 @@ function offsetDate(str, days) {
   const [y, m, d] = str.split("-").map(Number);
   const dt = new Date(y, m - 1, d + days);
   return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+}
+
+/**
+ * Derives a Win/Lose/Draw result from game counts.
+ * wins > losses → "Win", losses > wins → "Lose", equal → "Draw".
+ */
+function calcResult(wins, losses) {
+  if (wins > losses) return "Win";
+  if (losses > wins) return "Lose";
+  return "Draw";
+}
+
+/**
+ * Returns a human-readable relative time string for a Unix timestamp,
+ * e.g. "Just now", "3 min ago", "2 hrs ago".
+ */
+function fmtTimeAgo(ts) {
+  if (!ts) return null;
+  const diff = Math.floor((Date.now() - ts) / 1000);
+  if (diff < 60)           return "Just now";
+  if (diff < 3600)         return `${Math.floor(diff / 60)} min ago`;
+  if (diff < 86400)        return `${Math.floor(diff / 3600)} hr ago`;
+  return fmtDateLong(new Date(ts).toISOString().slice(0, 10));
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
@@ -257,11 +279,17 @@ function LogMatchButton({ onClick }) {
 
 function EntryCard({ entry, onOpen }) {
   const score = entry.goals.filter(Boolean).length;
+  // Show "Win - 2/1" for entries with wins/losses data; plain badge for legacy entries.
+  const hasScore = entry.wins != null && entry.losses != null;
+  const resultLabel = hasScore ? `${entry.result} — ${entry.wins}/${entry.losses}` : entry.result;
+  const s = RESULT_STYLE[entry.result] || { background: "var(--surface2)", color: "var(--text2)" };
   return React.createElement("div", { onClick: () => onOpen(entry), className: "entry-card" },
     React.createElement("div", { style: { flex: 1, minWidth: 0 } },
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 5, flexWrap: "wrap" } },
         React.createElement("span", { style: { fontWeight: 600, fontSize: 14, color: "var(--text)" } }, entry.format),
-        entry.result && React.createElement(Badge, { label: entry.result }),
+        entry.result && React.createElement("span", {
+          style: { fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 6, letterSpacing: "0.04em", ...s }
+        }, resultLabel),
         React.createElement("span", { style: { fontSize: 12, color: "var(--text2)", marginLeft: "auto" } }, fmtDateLong(entry.date))
       ),
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
@@ -476,7 +504,7 @@ function HistoryTab({ entries, goals, formats, onOpen, onLog }) {
     React.createElement("div", null,
       React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 } }, "Result"),
       React.createElement("div", { style: { display: "flex", gap: 6 } },
-        RESULTS.map(r => {
+        ["Win", "Lose", "Draw"].map(r => {
           const sel = results.includes(r);
           const s   = RESULT_STYLE[r];
           const style = sel
@@ -497,7 +525,8 @@ function HistoryTab({ entries, goals, formats, onOpen, onLog }) {
       React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
         React.createElement("div", { style: { position: "relative", flex: 1 } },
           React.createElement("input", {
-            type: "date", value: dateFrom, onChange: e => { setDateFrom(e.target.value); if (!dateTo) setDateTo(e.target.value); },
+            type: "date", value: dateFrom,
+            onChange: e => { setDateFrom(e.target.value); if (!dateTo) setDateTo(e.target.value); },
             style: { width: "100%", colorScheme: "normal" },
           }),
           !dateFrom && React.createElement("span", {
@@ -535,7 +564,7 @@ function HistoryTab({ entries, goals, formats, onOpen, onLog }) {
 
 const ROW_H = 52; // px per row including gap — used to compute ghost position and row shifts
 
-function FormatList({ formats, onChange }) {
+function FormatList({ formats, onChange, onRename }) {
   const [editing,  setEditing]  = useState(null); // index of the row being renamed
   const [editVal,  setEditVal]  = useState("");
   const [dragging, setDragging] = useState(null); // index of the row being dragged
@@ -582,9 +611,9 @@ function FormatList({ formats, onChange }) {
   const getShift = (i) => {
     if (dragging === null || overIdx === null || i === dragging) return 0;
     if (dragging < overIdx) {
-      if (i > dragging && i <= overIdx) return -ROW_H; // dragging down: rows above shift up
+      if (i > dragging && i <= overIdx) return -ROW_H;
     } else {
-      if (i >= overIdx && i < dragging) return ROW_H;  // dragging up: rows below shift down
+      if (i >= overIdx && i < dragging) return ROW_H;
     }
     return 0;
   };
@@ -593,7 +622,12 @@ function FormatList({ formats, onChange }) {
   const remove       = (i) => onChange(formats.filter((_, j) => j !== i));
 
   const commitEdit = (i) => {
-    if (editVal.trim()) onChange(formats.map((f, j) => j === i ? { ...f, name: editVal.trim() } : f));
+    const trimmed = editVal.trim();
+    if (trimmed && trimmed !== formats[i].name) {
+      onChange(formats.map((f, j) => j === i ? { ...f, name: trimmed } : f));
+      // Notify parent so it can propagate the rename to existing entries
+      if (onRename) onRename(formats[i].name, trimmed);
+    }
     setEditing(null);
   };
 
@@ -707,7 +741,7 @@ function FormatList({ formats, onChange }) {
 
 // ─── Settings tab ─────────────────────────────────────────────────────────────
 
-function SettingsTab({ settings, onSave }) {
+function SettingsTab({ settings, onSave, onFormatRename, lastSynced, onSyncSuccess }) {
   const [formats,    setFormats]    = useState(settings.formats);
   const [goals,      setGoals]      = useState(settings.goals);
   const [accent,     setAccent]     = useState(settings.accent);
@@ -744,9 +778,18 @@ function SettingsTab({ settings, onSave }) {
     const s = { ...settings, formats, goals, accent, darkMode };
     setSyncStatus("syncing");
     apiPost({ action: "saveSettings", settings: s })
-      .then(()  => { setSyncStatus("ok");    setTimeout(() => setSyncStatus(null), 2500); })
-      .catch(()  => { setSyncStatus("error"); setTimeout(() => setSyncStatus(null), 2500); });
+      .then(() => {
+        setSyncStatus("ok");
+        if (onSyncSuccess) onSyncSuccess();
+        setTimeout(() => setSyncStatus(null), 2500);
+      })
+      .catch(() => { setSyncStatus("error"); setTimeout(() => setSyncStatus(null), 2500); });
   };
+
+  const syncLabel = syncStatus === "syncing" ? "Syncing…"
+    : syncStatus === "ok"    ? "Synced ✓"
+    : syncStatus === "error" ? "Sync failed"
+    : "Sync now";
 
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 28 } },
 
@@ -755,7 +798,7 @@ function SettingsTab({ settings, onSave }) {
       React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginBottom: 10 } },
         "Drag ⠿ to reorder • tap name to rename • toggle Active/Hidden"
       ),
-      React.createElement(FormatList, { formats, onChange: setFormats }),
+      React.createElement(FormatList, { formats, onChange: setFormats, onRename: onFormatRename }),
       React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 10 } },
         React.createElement("input", {
           type: "text", placeholder: "Add format…", value: newFmt,
@@ -764,7 +807,11 @@ function SettingsTab({ settings, onSave }) {
           style: { flex: 1, fontSize: 13 },
         }),
         React.createElement("button", { className: "btn-primary", onClick: addFormat }, "Add")
-      )
+      ),
+      React.createElement("button", {
+        onClick: () => { if (window.confirm("Reset formats to defaults?")) setFormats(DEFAULT_FORMATS); },
+        style: { marginTop: 8, fontSize: 12, color: "var(--text3)", background: "none", border: "none", cursor: "pointer", padding: "4px 0" }
+      }, "Reset to defaults")
     ),
 
     React.createElement("div", null,
@@ -780,7 +827,11 @@ function SettingsTab({ settings, onSave }) {
             })
           )
         )
-      )
+      ),
+      React.createElement("button", {
+        onClick: () => { if (window.confirm("Reset goals to defaults?")) setGoals(DEFAULT_GOALS); },
+        style: { marginTop: 8, fontSize: 12, color: "var(--text3)", background: "none", border: "none", cursor: "pointer", padding: "4px 0" }
+      }, "Reset to defaults")
     ),
 
     React.createElement("div", null,
@@ -820,8 +871,11 @@ function SettingsTab({ settings, onSave }) {
           className: "btn-primary",
           onClick: syncNow,
           disabled: syncStatus === "syncing",
-        }, syncStatus === "syncing" ? "Syncing…" : syncStatus === "ok" ? "Synced ✓" : syncStatus === "error" ? "Sync failed" : "Sync now"),
+        }, syncLabel),
         syncStatus === "error" && React.createElement("span", { style: { fontSize: 12, color: "#dc2626" } }, "Check your script URL")
+      ),
+      lastSynced && React.createElement("div", { style: { marginTop: 6, fontSize: 12, color: "var(--text3)" } },
+        `Last synced: ${fmtTimeAgo(lastSynced)}`
       )
     ),
 
@@ -832,9 +886,13 @@ function SettingsTab({ settings, onSave }) {
 
 /**
  * Used for both new entries and edits. When `initial` is provided the form
- * is pre-populated; goal booleans are normalized to the current goals list
+ * is pre-populated. Goal booleans are normalized to the current goals list
  * length (padded with false or truncated) in case the user has changed their
  * goals since the entry was first saved.
+ *
+ * Result is derived automatically from wins/losses via calcResult().
+ * For legacy entries being edited (no stored wins/losses), sensible defaults
+ * are inferred from the stored result string.
  */
 function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onFormatChange }) {
   const activeFormats = settings.formats.filter(f => f.active).map(f => f.name);
@@ -847,16 +905,27 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onF
     : (activeFormats.includes(settings.lastFormat) ? settings.lastFormat : activeFormats[0] || "");
 
   // Normalize saved goal booleans to match the current goals list length.
-  // If goals were added since the entry was saved, new ones default to false.
-  // If goals were removed, the array is truncated.
   const normalizeGoals = (saved, count) =>
     [...saved, ...Array(Math.max(0, count - saved.length)).fill(false)].slice(0, count);
 
+  // For legacy entries (no wins/losses stored), infer sensible defaults from
+  // the stored result so the calculated result matches after editing.
+  const defaultWins   = initial?.wins   != null ? initial.wins
+    : initial?.result === "Win"  ? 2
+    : initial?.result === "Lose" ? 0
+    : 1;
+  const defaultLosses = initial?.losses != null ? initial.losses
+    : initial?.result === "Win"  ? 0
+    : initial?.result === "Lose" ? 2
+    : 1;
+
   const [form, setForm] = useState(initial
-    ? { ...initial, goals: normalizeGoals(initial.goals, goals.length) }
-    : { date: defaultDate || todayStr(), format: defaultFormat, result: "", notes: "", goals: Array(goals.length).fill(false) }
+    ? { ...initial, goals: normalizeGoals(initial.goals, goals.length), wins: defaultWins, losses: defaultLosses }
+    : { date: defaultDate || todayStr(), format: defaultFormat, notes: "", goals: Array(goals.length).fill(false), wins: 0, losses: 0 }
   );
   const [validationError, setValidationError] = useState("");
+
+  const result = calcResult(form.wins, form.losses);
 
   const toggle = i => {
     // Use functional form to avoid reading stale form.goals from closure
@@ -871,16 +940,40 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onF
     setForm(f => ({ ...f, [k]: v }));
     // Side-effect: persist the selected format as the new default for future entries
     if (k === "format") onFormatChange(v);
-    if (k === "result" || k === "date") setValidationError("");
+    if (k === "date") setValidationError("");
   };
 
   const score = form.goals.filter(Boolean).length;
 
   const handleSave = () => {
-    if (!form.result) { setValidationError("Please select a result."); return; }
-    if (!form.date)   { setValidationError("Please select a date.");   return; }
-    onSave(form);
+    if (!form.date) { setValidationError("Please select a date."); return; }
+    onSave({ ...form, result });
   };
+
+  // Style for the wins/losses selector buttons.
+  // 2-2 is not a valid score: disable the 2 button when the other side is already 2.
+  const gameBtn = (field, val) => {
+    const otherField = field === "wins" ? "losses" : "wins";
+    const disabled = val === 2 && form[otherField] === 2;
+    const active = form[field] === val;
+    return React.createElement("button", {
+      key: val,
+      disabled,
+      onClick: () => set(field, val),
+      style: {
+        flex: 1, padding: "10px 0", fontWeight: 600, fontSize: 16,
+        borderRadius: "var(--radius-sm)",
+        border: active ? `2px solid var(--accent)` : "1.5px solid var(--border)",
+        background: active ? "var(--accent-light)" : "var(--surface)",
+        color: active ? "var(--accent-text)" : "var(--text2)",
+        cursor: disabled ? "default" : "pointer",
+        opacity: disabled ? 0.35 : 1,
+        transition: "all 0.12s",
+      }
+    }, String(val));
+  };
+
+  const resultStyle = RESULT_STYLE[result] || { background: "var(--surface2)", color: "var(--text2)" };
 
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 20 } },
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
@@ -900,27 +993,37 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onF
         })
       )
     ),
-    React.createElement("div", { className: "field" },
-      React.createElement("label", null, "Result"),
-      React.createElement("div", { style: { display: "flex", gap: 8 } },
-        RESULTS.map(r => {
-          const s        = RESULT_STYLE[r];
-          const selected = form.result === r;
-          return React.createElement("button", {
-            key: r,
-            onClick: () => set("result", r),
-            style: {
-              flex: 1, padding: "10px 0", fontWeight: 600, fontSize: 14,
-              borderRadius: "var(--radius-sm)",
-              border:      selected ? `2px solid ${s.border}`    : "1.5px solid var(--border)",
-              background:  selected ? s.background               : "var(--surface)",
-              color:       selected ? s.color                     : "var(--text2)",
-              cursor: "pointer", transition: "all 0.12s",
-            }
-          }, r);
-        })
+
+    // Wins / Losses selectors
+    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
+      React.createElement("div", { className: "field" },
+        React.createElement("label", null, "Wins"),
+        React.createElement("div", { style: { display: "flex", gap: 6 } },
+          [0, 1, 2].map(v => gameBtn("wins", v))
+        )
+      ),
+      React.createElement("div", { className: "field" },
+        React.createElement("label", null, "Losses"),
+        React.createElement("div", { style: { display: "flex", gap: 6 } },
+          [0, 1, 2].map(v => gameBtn("losses", v))
+        )
       )
     ),
+
+    // Auto-calculated result display
+    React.createElement("div", { className: "field" },
+      React.createElement("label", null, "Result"),
+      React.createElement("div", { style: { display: "flex", alignItems: "center" } },
+        React.createElement("span", {
+          style: {
+            fontSize: 14, fontWeight: 600, padding: "8px 16px",
+            borderRadius: "var(--radius-sm)",
+            ...resultStyle,
+          }
+        }, `${result} — ${form.wins}/${form.losses}`)
+      )
+    ),
+
     React.createElement("div", { className: "goals-box" },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 } },
         React.createElement("span", { style: { fontWeight: 600, fontSize: 14, color: "var(--text)" } }, "Mental game goals"),
@@ -974,11 +1077,15 @@ function DetailView({ entry, goals, onEdit, onDelete, onBack }) {
   // This can happen if goals were added or removed in Settings after the entry
   // was logged. The goal boolean values (checked/unchecked) are always correct.
   const displayGoals = goals.length === entry.goals.length ? goals : DEFAULT_GOALS;
+  const hasScore = entry.wins != null && entry.losses != null;
+  const s = RESULT_STYLE[entry.result] || { background: "var(--surface2)", color: "var(--text2)" };
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
     React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
       React.createElement("button", { className: "btn-ghost", onClick: onBack, style: { fontSize: 13 } }, "‹ Back"),
       React.createElement("span", { style: { fontWeight: 600, fontSize: 15, flex: 1, color: "var(--text)" } }, `${entry.format} — ${fmtDateLong(entry.date)}`),
-      entry.result && React.createElement(Badge, { label: entry.result })
+      entry.result && React.createElement("span", {
+        style: { fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 6, letterSpacing: "0.04em", ...s }
+      }, hasScore ? `${entry.result} — ${entry.wins}/${entry.losses}` : entry.result)
     ),
     React.createElement("div", { className: "goals-box" },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 12 } },
@@ -1013,18 +1120,16 @@ function DetailView({ entry, goals, onEdit, onDelete, onBack }) {
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 function App() {
-  const [settings,  setSettings]  = useState(loadSettings);
-  const [entries,   setEntries]   = useState(() => cacheLoad().sort((a, b) => b.id - a.id));
-  const [tab,       setTab]       = useState("Daily");
-  const [view,      setView]      = useState("tabs");  // "tabs" | "log" | "detail" | "edit"
-  const [dailyDate, setDailyDate] = useState(todayStr);
-  const [selected,  setSelected]  = useState(null);   // the entry open in detail/edit view
-  const [loading,   setLoading]   = useState(true);   // true only on first load when cache is empty
-  const [syncing,   setSyncing]   = useState(false);
-  const [error,     setError]     = useState(null);
-  // Note: saving/deleting states were removed. All data mutations are optimistic
-  // (UI updates synchronously before the API call), so these states never rendered
-  // in a non-false value and served no functional purpose.
+  const [settings,    setSettings]    = useState(loadSettings);
+  const [entries,     setEntries]     = useState(() => cacheLoad().sort((a, b) => b.id - a.id));
+  const [tab,         setTab]         = useState("Daily");
+  const [view,        setView]        = useState("tabs");  // "tabs" | "log" | "detail" | "edit"
+  const [dailyDate,   setDailyDate]   = useState(todayStr);
+  const [selected,    setSelected]    = useState(null);   // the entry open in detail/edit view
+  const [loading,     setLoading]     = useState(true);   // true only on first load when cache is empty
+  const [syncing,     setSyncing]     = useState(false);
+  const [error,       setError]       = useState(null);
+  const [lastSynced,  setLastSynced]  = useState(null);   // Unix timestamp of last successful sync
 
   // Android back gesture: push a history entry when entering a detail/form view
   // so the device back button navigates within the app instead of leaving it.
@@ -1058,14 +1163,13 @@ function App() {
           .map(e => ({ ...e, date: String(e.date).slice(0, 10) }))
           .sort((a, b) => b.id - a.id);
         setAndCache(sorted);
-        // If the sheet has settings (requires a redeployed script), merge them
-        // over local settings so changes made on other devices take effect.
         if (sheetSettings) {
           const merged = { ...loadSettings(), ...sheetSettings };
           saveSettings(merged);
           setSettings(merged);
           applyTheme(merged.accent, merged.darkMode);
         }
+        setLastSynced(Date.now());
       })
       .catch(() => {
         if (!hasCached) setError("Couldn't load entries. Check your script URL.");
@@ -1083,6 +1187,23 @@ function App() {
     const updated = { ...settings, lastFormat: fmt };
     saveSettings(updated);
     setSettings(updated);
+  };
+
+  /**
+   * Propagates a format rename to all existing entries.
+   * Called from SettingsTab → FormatList when a format name changes.
+   * Shows a confirmation if any entries would be affected.
+   */
+  const handleFormatRename = (oldName, newName) => {
+    const affected = entries.filter(e => e.format === oldName);
+    if (!affected.length) return;
+    if (!window.confirm(`Update ${affected.length} existing ${affected.length === 1 ? "entry" : "entries"} from "${oldName}" to "${newName}"?`)) return;
+    const updated = entries.map(e => e.format === oldName ? { ...e, format: newName } : e);
+    setAndCache(updated);
+    // Background sync each affected entry
+    affected.forEach(e => {
+      apiPost({ action: "update", entry: { ...e, format: newName } }).catch(() => {});
+    });
   };
 
   // ── Data mutations (optimistic local-first) ───────────────────────────────
@@ -1160,7 +1281,7 @@ function App() {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.15"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.17"),
         ),
         tab === "Daily" && React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
@@ -1185,7 +1306,13 @@ function App() {
               })
             ),
             React.createElement("div", { style: { minWidth: "100%", width: "100%", padding: "0 8px" } },
-              React.createElement(SettingsTab, { settings, onSave: s => setSettings(s) })
+              React.createElement(SettingsTab, {
+                settings,
+                onSave: s => setSettings(s),
+                onFormatRename: handleFormatRename,
+                lastSynced,
+                onSyncSuccess: () => setLastSynced(Date.now()),
+              })
             )
           )
     ),

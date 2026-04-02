@@ -74,7 +74,13 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       font-size: 16px; line-height: 1.5; min-height: 100vh;
       -webkit-font-smoothing: antialiased;
-      transition: background 0.2s, color 0.2s;
+      transition: background 0.5s, color 0.5s;
+    }
+
+    /* Dark mode crossfade — surface elements transition with the page */
+    .entry-card, .goals-box, .notes-box, .stat-card,
+    input, select, textarea {
+      transition: background 0.5s, border-color 0.5s, color 0.5s;
     }
 
     .app { max-width: 560px; margin: 0 auto; padding: 24px 16px env(safe-area-inset-bottom, 16px); }
