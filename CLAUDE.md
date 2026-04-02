@@ -8,7 +8,7 @@ A PWA (Progressive Web App) for logging Magic: The Gathering matches. Data is st
 
 ## Deployment
 
-**Frontend:** Hosted on Netlify. Deploy by pushing to `main` — or manually via Netlify Drop. The service worker (`sw.js`) caches all static assets under the key `mtg-journal-v2`. When `app.js` or other assets change, users on the PWA may serve a stale cached version until the service worker updates. There is no way to force-bust the cache from code; users can clear site data manually.
+**Frontend:** Hosted on GitHub Pages. Deploy by pushing to `main`. The service worker (`sw.js`) caches all static assets under the key `mtg-journal-v2`. When `app.js` or other assets change, users on the PWA may serve a stale cached version until the service worker updates. There is no way to force-bust the cache from code; users can clear site data manually.
 
 **Backend:** `Code.gs` runs as a Google Apps Script web app. After any change to `Code.gs`, a **new deployment version must be created** in the Apps Script editor (Deploy → Manage deployments → edit → New version). The deployed URL never changes, but the old code keeps running until redeployed.
 
