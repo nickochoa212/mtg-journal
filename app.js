@@ -852,10 +852,13 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, sav
         React.createElement("span", { style: { fontSize: 12, color: "var(--text2)" } }, `${score}/${goals.length}`)
       ),
       goals.map((g, i) =>
-        React.createElement("label", { key: i, className: "goal-row" },
+        React.createElement("label", {
+          key: i, className: "goal-row",
+          onTouchEnd: e => { e.preventDefault(); toggle(i); },
+          onClick: () => toggle(i),
+        },
           React.createElement("span", {
             className: `checkbox ${form.goals[i] ? "checked" : ""}`,
-            onClick: () => toggle(i),
           },
             form.goals[i] && React.createElement("svg", { width: 10, height: 8, viewBox: "0 0 10 8", fill: "none" },
               React.createElement("path", { d: "M1 4l3 3 5-6", stroke: "#fff", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" })
@@ -863,7 +866,6 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, sav
           ),
           React.createElement("span", {
             style: { fontSize: 14, lineHeight: 1.5, color: form.goals[i] ? "var(--text)" : "var(--text2)" },
-            onClick: () => toggle(i),
           }, g)
         )
       )
