@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#3C3489" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="MTG Journal" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <title>MTG Match Journal</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #f9fafb; --surface: #ffffff; --surface2: #f3f4f6;
+      --border: #e5e7eb; --border2: #d1d5db;
+      --text: #111827; --text2: #6b7280; --text3: #9ca3af;
+      --accent: #3C3489; --accent-light: #eeedfe; --accent-text: #3C3489;
+      --radius: 12px; --radius-sm: 8px;
+    }
+
+    /* ── Accent themes ── */
+    body.accent-blue   { --accent: #185FA5; --accent-light: #e6f1fb; --accent-text: #185FA5; }
+    body.accent-teal   { --accent: #0F6E56; --accent-light: #e1f5ee; --accent-text: #0F6E56; }
+    body.accent-green  { --accent: #3B6D11; --accent-light: #eaf3de; --accent-text: #3B6D11; }
+    body.accent-coral  { --accent: #993C1D; --accent-light: #faece7; --accent-text: #993C1D; }
+    body.accent-pink   { --accent: #993556; --accent-light: #fbeaf0; --accent-text: #993556; }
+
+    /* ── Dark mode (system) ── */
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111827; --surface: #1f2937; --surface2: #374151;
+        --border: #374151; --border2: #4b5563;
+        --text: #f9fafb; --text2: #9ca3af; --text3: #6b7280;
+      }
+      body.accent-purple { --accent: #7f77dd; --accent-light: #26215c; --accent-text: #afa9ec; }
+      body.accent-blue   { --accent: #5b9fdf; --accent-light: #0c2a44; --accent-text: #85b7eb; }
+      body.accent-teal   { --accent: #1d9e75; --accent-light: #04342c; --accent-text: #5dcaa5; }
+      body.accent-green  { --accent: #639922; --accent-light: #173404; --accent-text: #97c459; }
+      body.accent-coral  { --accent: #d85a30; --accent-light: #4a1b0c; --accent-text: #f0997b; }
+      body.accent-pink   { --accent: #d4537e; --accent-light: #4b1528; --accent-text: #ed93b1; }
+    }
+
+    /* ── Force light ── */
+    body.theme-light {
+      --bg: #f9fafb; --surface: #ffffff; --surface2: #f3f4f6;
+      --border: #e5e7eb; --border2: #d1d5db;
+      --text: #111827; --text2: #6b7280; --text3: #9ca3af;
+    }
+    body.theme-light.accent-purple { --accent: #3C3489; --accent-light: #eeedfe; --accent-text: #3C3489; }
+    body.theme-light.accent-blue   { --accent: #185FA5; --accent-light: #e6f1fb; --accent-text: #185FA5; }
+    body.theme-light.accent-teal   { --accent: #0F6E56; --accent-light: #e1f5ee; --accent-text: #0F6E56; }
+    body.theme-light.accent-green  { --accent: #3B6D11; --accent-light: #eaf3de; --accent-text: #3B6D11; }
+    body.theme-light.accent-coral  { --accent: #993C1D; --accent-light: #faece7; --accent-text: #993C1D; }
+    body.theme-light.accent-pink   { --accent: #993556; --accent-light: #fbeaf0; --accent-text: #993556; }
+
+    /* ── Force dark ── */
+    body.theme-dark {
+      --bg: #111827; --surface: #1f2937; --surface2: #374151;
+      --border: #374151; --border2: #4b5563;
+      --text: #f9fafb; --text2: #9ca3af; --text3: #6b7280;
+    }
+    body.theme-dark.accent-purple { --accent: #7f77dd; --accent-light: #26215c; --accent-text: #afa9ec; }
+    body.theme-dark.accent-blue   { --accent: #5b9fdf; --accent-light: #0c2a44; --accent-text: #85b7eb; }
+    body.theme-dark.accent-teal   { --accent: #1d9e75; --accent-light: #04342c; --accent-text: #5dcaa5; }
+    body.theme-dark.accent-green  { --accent: #639922; --accent-light: #173404; --accent-text: #97c459; }
+    body.theme-dark.accent-coral  { --accent: #d85a30; --accent-light: #4a1b0c; --accent-text: #f0997b; }
+    body.theme-dark.accent-pink   { --accent: #d4537e; --accent-light: #4b1528; --accent-text: #ed93b1; }
+
+    html, body {
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 16px; line-height: 1.5; min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      transition: background 0.2s, color 0.2s;
+    }
+
+    .app { max-width: 560px; margin: 0 auto; padding: 24px 16px env(safe-area-inset-bottom, 16px); }
+    h1 { font-size: 22px; font-weight: 700; color: var(--text); letter-spacing: -0.02em; }
+    p  { font-size: 13px; color: var(--text2); margin-top: 2px; }
+
+    .entry-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 14px 16px; cursor: pointer;
+      display: flex; align-items: center; gap: 12px;
+      transition: border-color 0.15s; -webkit-tap-highlight-color: transparent;
+    }
+    .entry-card:hover { border-color: var(--border2); }
+    .entry-card:active { transform: scale(0.99); }
+
+    .goals-box { background: var(--surface2); border-radius: var(--radius); padding: 16px; }
+    .goal-row { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin-bottom: 12px; -webkit-tap-highlight-color: transparent; }
+    .goal-row:last-child { margin-bottom: 0; }
+
+    .checkbox {
+      width: 20px; height: 20px; border-radius: 5px;
+      border: 1.5px solid var(--border2); background: var(--surface);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; margin-top: 2px; transition: all 0.12s;
+    }
+    .checkbox.checked { background: #059669; border-color: #059669; }
+
+    .notes-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+
+    .stats-grid { display: grid; grid-template-columns: repeat(6, minmax(0,1fr)); gap: 8px; margin-bottom: 20px; }
+    .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 6px; text-align: center; }
+    .stat-val   { font-size: 18px; font-weight: 700; color: var(--text); }
+    .stat-label { font-size: 11px; color: var(--text2); margin-top: 2px; }
+
+    .empty-state { text-align: center; padding: 48px 16px; color: var(--text3); font-size: 14px; border: 1.5px dashed var(--border); border-radius: var(--radius); }
+
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field label { font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em; }
+
+    input, select, textarea {
+      width: 100%; background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 10px 12px; font-size: 14px;
+      color: var(--text); font-family: inherit; appearance: none; -webkit-appearance: none;
+      outline: none; transition: border-color 0.15s;
+    }
+    select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236b7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 12px center; padding-right: 32px;
+    }
+    textarea { resize: vertical; line-height: 1.5; min-height: 80px; }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
+    /* Make empty date inputs transparent so the overlay placeholder label shows through */
+    input[type="date"]:not([value])::-webkit-datetime-edit { color: transparent; }
+    input[type="date"][value=""]::-webkit-datetime-edit    { color: transparent; }
+
+    button {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 9px 16px; font-size: 14px; font-weight: 500; border-radius: var(--radius-sm);
+      cursor: pointer; font-family: inherit; transition: all 0.12s;
+      border: 1px solid var(--border); background: var(--surface); color: var(--text);
+      -webkit-tap-highlight-color: transparent;
+    }
+    button:hover { background: var(--surface2); }
+    button:active { transform: scale(0.97); }
+    button:disabled { opacity: 0.5; cursor: default; }
+
+    .btn-primary { background: var(--accent-light); color: var(--accent-text); border-color: transparent; }
+    .btn-primary:hover { filter: brightness(0.96); background: var(--accent-light); }
+    .btn-ghost { background: transparent; border-color: var(--border); }
+    .btn-danger { color: #dc2626; border-color: #fecaca; background: #fff5f5; }
+    .btn-danger:hover { background: #fee2e2; }
+
+    /* Tabs */
+    .tab-bar { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+    .tab-btn {
+      flex: 1; background: none; border: none; border-bottom: 2px solid transparent;
+      border-radius: 0; padding: 10px 0; font-size: 14px; font-weight: 500;
+      color: var(--text2); cursor: pointer; margin-bottom: -1px; transition: color 0.15s, border-color 0.15s;
+    }
+    .tab-btn:hover { color: var(--text); background: none; }
+    .tab-btn:active { transform: none; }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* Day nav */
+    .day-nav { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+    .day-nav-arrow { background: none; border: none; font-size: 22px; line-height: 1; color: var(--text2); cursor: pointer; padding: 0 4px; border-radius: 6px; }
+    .day-nav-arrow:hover { background: var(--surface2); color: var(--text); }
+    .day-nav-arrow:active { transform: scale(0.92); }
+    .day-nav-input { border: none; background: none; text-align: center; font-size: 15px; font-weight: 600; color: var(--text); padding: 0; width: 100%; cursor: pointer; outline: none; box-shadow: none; }
+    .day-nav-label { font-size: 11px; color: var(--text2); text-align: center; margin-top: 2px; }
+
+    /* Filter bar */
+    .filter-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .filter-select { flex: 1; min-width: 100px; font-size: 13px; padding: 7px 10px; }
+
+    /* Log match button */
+    .log-match-btn {
+      width: 100%; padding: 14px; font-size: 15px; font-weight: 600;
+      background: var(--accent-light); color: var(--accent-text);
+      border: 1.5px dashed var(--accent); border-radius: var(--radius);
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      gap: 8px; opacity: 0.85; transition: opacity 0.15s, transform 0.1s;
+    }
+    .log-match-btn:hover { opacity: 1; }
+    .log-match-btn:active { transform: scale(0.98); }
+    .log-match-plus { font-size: 20px; font-weight: 400; line-height: 1; }
+
+    /* Tab slider — panels laid out side by side, translateX picks visible one */
+    /* Transition handled inline by TabSlider component */
+
+    /* Compact date nav in header */
+    .date-nav-compact { display: flex; align-items: center; gap: 4px; }
+    .date-nav-arrow {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); width: 32px; height: 32px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; color: var(--text2); cursor: pointer; line-height: 1;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .date-nav-arrow:hover  { background: var(--border); color: var(--text); }
+    .date-nav-arrow:active { transform: scale(0.92); }
+    .date-nav-label {
+      font-size: 13px; font-weight: 600; color: var(--text);
+      width: 90px; text-align: center; white-space: nowrap; display: inline-block;
+    }
+
+    /* Sync indicator */
+    .sync-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--text3);
+      display: inline-block;
+      animation: pulse-dot 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse-dot { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+    /* Spinner */
+    .spinner { width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Banners */
+    .error-banner { background: #fee2e2; color: #991b1b; border-radius: var(--radius-sm); padding: 10px 14px; font-size: 13px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; }
+
+    /* Settings — format drag list */
+    .fmt-row { cursor: default; }
+    .fmt-row input { min-width: 0; }
+
+    /* Settings — format chips (legacy, kept for compat) */
+    .format-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 20px; padding: 4px 10px 4px 12px; font-size: 13px; font-weight: 500; color: var(--text);
+    }
+    .chip-input { border: none; background: none; outline: none; font-size: 13px; font-weight: 500; color: var(--text); width: 60px; padding: 0; box-shadow: none; }
+    .chip-remove { background: none; border: none; color: var(--text3); font-size: 16px; line-height: 1; padding: 0 2px; cursor: pointer; }
+    .chip-remove:hover { color: #dc2626; background: none; }
+    .chip-remove:active { transform: none; }
+
+    /* Settings — mode toggle */
+    .mode-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+    .mode-btn { border: none; border-radius: 0; background: var(--surface); color: var(--text2); font-size: 13px; padding: 8px 16px; cursor: pointer; transition: background 0.12s, color 0.12s; }
+    .mode-btn:hover { background: var(--surface2); color: var(--text); }
+    .mode-btn:active { transform: none; }
+    .mode-btn.active { background: var(--accent-light); color: var(--accent-text); font-weight: 600; }
+    .mode-btn + .mode-btn { border-left: 1px solid var(--border); }
+
+    /* Toggle switch */
+    .toggle {
+      display: inline-block; width: 36px; height: 21px;
+      border-radius: 11px; background: var(--border2);
+      position: relative; cursor: pointer;
+      transition: background 0.2s; flex-shrink: 0;
+    }
+    .toggle::after {
+      content: ""; position: absolute;
+      width: 17px; height: 17px; border-radius: 50%;
+      background: white; top: 2px; left: 2px;
+      transition: transform 0.2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+    .toggle.on { background: #059669; }
+    .toggle.on::after { transform: translateX(15px); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="app.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => { navigator.serviceWorker.register("sw.js"); });
+    }
+  </script>
+</body>
+</html>
