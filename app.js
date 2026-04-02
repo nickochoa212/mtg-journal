@@ -70,6 +70,14 @@ function fmtDateShort(str) {
   return `${months[+m-1]} ${+d}`;
 }
 
+/** Formats a YYYY-MM-DD string as a full date, e.g. "April 2, 2026". */
+function fmtDateLong(str) {
+  if (!str) return "";
+  const [y, m, d] = str.split("-");
+  const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  return `${months[+m-1]} ${+d}, ${y}`;
+}
+
 /**
  * Returns a new YYYY-MM-DD string shifted by `days` from `str`.
  * Uses the Date constructor so month/year rollovers are handled correctly.
@@ -254,7 +262,7 @@ function EntryCard({ entry, onOpen }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 5, flexWrap: "wrap" } },
         React.createElement("span", { style: { fontWeight: 600, fontSize: 14, color: "var(--text)" } }, entry.format),
         entry.result && React.createElement(Badge, { label: entry.result }),
-        React.createElement("span", { style: { fontSize: 12, color: "var(--text2)", marginLeft: "auto" } }, entry.date)
+        React.createElement("span", { style: { fontSize: 12, color: "var(--text2)", marginLeft: "auto" } }, fmtDateLong(entry.date))
       ),
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
         React.createElement(ScorePips, { checked: score, total: entry.goals.length }),
@@ -437,7 +445,7 @@ function HistoryTab({ entries, goals, formats, onOpen, onLog }) {
     if (dateFrom && e.date < dateFrom) return false;
     if (dateTo   && e.date > dateTo)   return false;
     return true;
-  }).sort((a, b) => b.id - a.id);
+  }).sort((a, b) => b.date < a.date ? -1 : b.date > a.date ? 1 : b.id - a.id);
 
   const hasFilters = selectedFormats.length || results.length || dateFrom || dateTo;
 
@@ -969,7 +977,7 @@ function DetailView({ entry, goals, onEdit, onDelete, onBack }) {
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
     React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
       React.createElement("button", { className: "btn-ghost", onClick: onBack, style: { fontSize: 13 } }, "‹ Back"),
-      React.createElement("span", { style: { fontWeight: 600, fontSize: 15, flex: 1, color: "var(--text)" } }, `${entry.format} — ${entry.date}`),
+      React.createElement("span", { style: { fontWeight: 600, fontSize: 15, flex: 1, color: "var(--text)" } }, `${entry.format} — ${fmtDateLong(entry.date)}`),
       entry.result && React.createElement(Badge, { label: entry.result })
     ),
     React.createElement("div", { className: "goals-box" },
@@ -1152,7 +1160,7 @@ function App() {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.13"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.14"),
         ),
         tab === "Daily" && React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
