@@ -66,7 +66,7 @@ function offsetDate(str, days) {
 }
 
 function haptic() {
-  try { if (navigator.vibrate) navigator.vibrate(25); } catch {}
+  try { if (navigator.vibrate) navigator.vibrate(50); } catch {}
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
@@ -653,21 +653,22 @@ function FormatList({ formats, onChange }) {
 // ─── Settings tab ─────────────────────────────────────────────────────────────
 
 function SettingsTab({ settings, onSave }) {
-  const [formats,    setFormats]    = useState(settings.formats);
-  const [goals,      setGoals]      = useState(settings.goals);
-  const [accent,     setAccent]     = useState(settings.accent);
-  const [darkMode,   setDarkMode]   = useState(settings.darkMode);
-  const [newFmt,     setNewFmt]     = useState("");
-  const [saveStatus, setSaveStatus] = useState(null);
-
-  const isDirty = (
-    JSON.stringify(formats) !== JSON.stringify(settings.formats) ||
-    JSON.stringify(goals)   !== JSON.stringify(settings.goals)   ||
-    accent   !== settings.accent   ||
-    darkMode !== settings.darkMode
-  );
+  const [formats,  setFormats]  = useState(settings.formats);
+  const [goals,    setGoals]    = useState(settings.goals);
+  const [accent,   setAccent]   = useState(settings.accent);
+  const [darkMode, setDarkMode] = useState(settings.darkMode);
+  const [newFmt,   setNewFmt]   = useState("");
+  const mounted = useRef(false);
 
   useEffect(() => { applyTheme(accent, darkMode); }, [accent, darkMode]);
+
+  // Auto-save whenever any setting changes (skip initial mount)
+  useEffect(() => {
+    if (!mounted.current) { mounted.current = true; return; }
+    const s = { ...settings, formats, goals, accent, darkMode };
+    saveSettings(s);
+    onSave(s);
+  }, [formats, goals, accent, darkMode]);
 
   const addFormat = () => {
     const v = newFmt.trim();
@@ -678,14 +679,6 @@ function SettingsTab({ settings, onSave }) {
   };
 
   const setGoal = (i, v) => setGoals(goals.map((g, j) => j === i ? v : g));
-
-  const handleSave = () => {
-    const s = { ...settings, formats, goals, accent, darkMode };
-    saveSettings(s);
-    onSave(s);
-    setSaveStatus("saved");
-    setTimeout(() => setSaveStatus(null), 2500);
-  };
 
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 28 } },
 
@@ -752,14 +745,6 @@ function SettingsTab({ settings, onSave }) {
       )
     ),
 
-    React.createElement("div", { style: { display: "flex", justifyContent: "flex-end" } },
-      React.createElement("button", {
-        className: "btn-primary",
-        onClick: handleSave,
-        disabled: !isDirty,
-        style: { opacity: isDirty ? 1 : 0.5, transition: "opacity 0.2s" },
-      }, saveStatus === "saved" ? "Saved ✓" : "Save settings")
-    )
   );
 }
 
@@ -854,6 +839,7 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, sav
       goals.map((g, i) =>
         React.createElement("label", {
           key: i, className: "goal-row",
+          onTouchStart: () => haptic(),
           onTouchEnd: e => { e.preventDefault(); toggle(i); },
           onClick: () => toggle(i),
         },
@@ -1061,7 +1047,7 @@ function App() {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.4"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.5"),
           syncing && React.createElement("span", {
             style: { fontSize: 11, color: "var(--text3)", display: "flex", alignItems: "center", gap: 3 }
           },
