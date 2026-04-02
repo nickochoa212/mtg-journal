@@ -65,11 +65,22 @@ function offsetDate(str, days) {
   return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
 }
 
+let _hapticToast = null;
 function haptic() {
   try {
-    const result = navigator.vibrate ? navigator.vibrate(200) : "API missing";
-    console.log("[haptic]", result, "vibrate available:", !!navigator.vibrate);
-  } catch(e) { console.log("[haptic] error", e); }
+    const available = !!navigator.vibrate;
+    const result = available ? navigator.vibrate(200) : null;
+    // Temporary debug toast — remove once vibration is confirmed working
+    const msg = available ? `vibrate(200) → ${result}` : "navigator.vibrate missing";
+    if (_hapticToast) clearTimeout(_hapticToast._t);
+    let el = document.getElementById("haptic-debug");
+    if (!el) { el = document.createElement("div"); el.id = "haptic-debug"; Object.assign(el.style, { position:"fixed", bottom:"80px", left:"50%", transform:"translateX(-50%)", background:"#111", color:"#fff", fontSize:"12px", padding:"6px 12px", borderRadius:"20px", zIndex:9999, pointerEvents:"none", whiteSpace:"nowrap" }); document.body.appendChild(el); }
+    el.textContent = msg;
+    el.style.opacity = "1";
+    _hapticToast = { _t: setTimeout(() => { el.style.opacity = "0"; }, 2000) };
+  } catch(e) {
+    // ignore
+  }
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
@@ -1050,7 +1061,7 @@ function App() {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.6"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.7"),
           syncing && React.createElement("span", {
             style: { fontSize: 11, color: "var(--text3)", display: "flex", alignItems: "center", gap: 3 }
           },
