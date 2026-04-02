@@ -497,7 +497,7 @@ function HistoryTab({ entries, goals, formats, onOpen, onLog }) {
       React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
         React.createElement("div", { style: { position: "relative", flex: 1 } },
           React.createElement("input", {
-            type: "date", value: dateFrom, onChange: e => setDateFrom(e.target.value),
+            type: "date", value: dateFrom, onChange: e => { setDateFrom(e.target.value); if (!dateTo) setDateTo(e.target.value); },
             style: { width: "100%", colorScheme: "normal" },
           }),
           !dateFrom && React.createElement("span", {
@@ -1160,7 +1160,7 @@ function App() {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.14"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.15"),
         ),
         tab === "Daily" && React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
