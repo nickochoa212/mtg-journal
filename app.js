@@ -1,4 +1,4 @@
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwVknQwEWTp9P4WLvo9aREu3Ft_Jtvi61EmCM0NDfTGUHSQUjiy-nZNJHplTj2Xhd5ZUg/exec";
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycby3Dj3LEz3AcIfAfUGhOurzZZlMrXQyrF03AfDZ0rABMtPq23tzL8g4PiuGpteBW9zAqQ/exec";
 
 const { useState, useEffect, useRef } = React;
 
@@ -66,7 +66,7 @@ function offsetDate(str, days) {
 }
 
 function haptic() {
-  try { if (navigator.vibrate) navigator.vibrate(200); } catch {}
+  try { if (navigator.vibrate) navigator.vibrate(30); } catch {}
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
