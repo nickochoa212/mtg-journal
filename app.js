@@ -1,6 +1,11 @@
+// ─── Config ───────────────────────────────────────────────────────────────────
+// Replace this URL with your own deployed Google Apps Script web app URL.
+// To find or create it: Extensions → Apps Script → Deploy → Manage deployments.
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycby3Dj3LEz3AcIfAfUGhOurzZZlMrXQyrF03AfDZ0rABMtPq23tzL8g4PiuGpteBW9zAqQ/exec";
 
 const { useState, useEffect, useRef } = React;
+
+// ─── Default data ─────────────────────────────────────────────────────────────
 
 const DEFAULT_GOALS = [
   "Don't let emotions take over. Focus on the game and optimizing my outs.",
@@ -12,20 +17,22 @@ const DEFAULT_GOALS = [
 
 const DEFAULT_FORMATS = [
   { name: "Duel Commander", active: true },
-  { name: "Pauper",    active: true },
-  { name: "Legacy",    active: true },
-  { name: "Premodern", active: true },
-  { name: "Modern",    active: true },
-  { name: "Cube",      active: true },
+  { name: "Pauper",         active: true },
+  { name: "Legacy",         active: true },
+  { name: "Premodern",      active: true },
+  { name: "Modern",         active: true },
+  { name: "Cube",           active: true },
 ];
 
 const RESULTS = ["Win", "Lose", "Draw"];
-const TABS = ["Daily", "History", "Settings"];
+const TABS    = ["Daily", "History", "Settings"];
 
+// Shared result styling used by Badge, HistoryTab filter pills, and LogForm
+// result buttons. `border` is the accent ring color for the selected state.
 const RESULT_STYLE = {
-  Win:  { background: "#d1fae5", color: "#065f46" },
-  Lose: { background: "#fee2e2", color: "#991b1b" },
-  Draw: { background: "#fef9c3", color: "#854d0e" },
+  Win:  { background: "#d1fae5", color: "#065f46", border: "#059669" },
+  Lose: { background: "#fee2e2", color: "#991b1b", border: "#dc2626" },
+  Draw: { background: "#fef9c3", color: "#854d0e", border: "#d97706" },
 };
 
 const ACCENT_OPTIONS = [
@@ -39,42 +46,59 @@ const ACCENT_OPTIONS = [
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
+/** Returns today's date as a YYYY-MM-DD string in local time. */
 function todayStr() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 
+/** Returns yesterday's date as a YYYY-MM-DD string. */
 function yesterdayStr() {
   return offsetDate(todayStr(), -1);
 }
 
+/**
+ * Formats a YYYY-MM-DD string for display.
+ * Returns "Today", "Yesterday", or a short date like "Apr 2".
+ */
 function fmtDateShort(str) {
   if (!str) return "";
-  const today = todayStr();
-  const yesterday = yesterdayStr();
-  if (str === today)     return "Today";
-  if (str === yesterday) return "Yesterday";
-  const [y, m, d] = str.split("-");
+  if (str === todayStr())     return "Today";
+  if (str === yesterdayStr()) return "Yesterday";
+  const [, m, d] = str.split("-");
   const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   return `${months[+m-1]} ${+d}`;
 }
 
+/**
+ * Returns a new YYYY-MM-DD string shifted by `days` from `str`.
+ * Uses the Date constructor so month/year rollovers are handled correctly.
+ */
 function offsetDate(str, days) {
   const [y, m, d] = str.split("-").map(Number);
   const dt = new Date(y, m - 1, d + days);
   return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
 }
 
-
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
+/**
+ * Loads settings from localStorage, applying data migrations, and falling back
+ * to defaults if storage is empty or corrupt.
+ *
+ * Migrations:
+ *   - pre-v1.0: formats were stored as bare strings; converted to { name, active }.
+ *   - v1.0.9:   format "DC" renamed to "Duel Commander".
+ */
 function loadSettings() {
   try {
     const s = JSON.parse(localStorage.getItem("mtg-journal-settings") || "{}");
     let formats = s.formats || DEFAULT_FORMATS;
+    // Migration: pre-v1.0 stored formats as plain strings
     if (formats.length && typeof formats[0] === "string") {
       formats = formats.map(name => ({ name, active: true }));
     }
+    // Migration: v1.0.9 renamed "DC" to "Duel Commander"
     formats = formats.map(f => f.name === "DC" ? { ...f, name: "Duel Commander" } : f);
     return {
       formats,
@@ -88,10 +112,15 @@ function loadSettings() {
   }
 }
 
+/** Persists settings to localStorage. */
 function saveSettings(s) {
   localStorage.setItem("mtg-journal-settings", JSON.stringify(s));
 }
 
+/**
+ * Applies accent color and dark/light/auto mode to the document body via CSS
+ * classes. Called on initial load, settings change, and after sheet sync.
+ */
 function applyTheme(accent, darkMode) {
   const body = document.body;
   body.classList.remove("theme-light", "theme-dark");
@@ -105,25 +134,39 @@ function applyTheme(accent, darkMode) {
 
 const CACHE_KEY = "mtg-journal-entries-cache";
 
+/** Loads the entries cache from localStorage. Returns [] on parse error. */
 function cacheLoad() {
   try { return JSON.parse(localStorage.getItem(CACHE_KEY) || "[]"); } catch { return []; }
 }
 
+/** Saves entries to the localStorage cache for offline/fast-startup reads. */
 function cacheSave(entries) {
   try { localStorage.setItem(CACHE_KEY, JSON.stringify(entries)); } catch {}
 }
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 
+/**
+ * Fetches all entries and settings from the Google Apps Script.
+ * Handles both the legacy response shape (bare array) and the current shape
+ * ({ entries, settings }) for backwards compatibility with old deployments.
+ */
 async function apiGet() {
   const res = await fetch(SCRIPT_URL);
   if (!res.ok) throw new Error("Failed");
   const data = await res.json();
-  // Support both old (array) and new ({ entries, settings }) response shapes
   if (Array.isArray(data)) return { entries: data, settings: null };
   return data;
 }
 
+/**
+ * Posts an action payload to the Google Apps Script.
+ *
+ * Uses Content-Type: text/plain instead of application/json intentionally —
+ * Google Apps Script rejects cross-origin requests with application/json
+ * during the CORS preflight. text/plain bypasses the preflight, and the
+ * body is then parsed manually as JSON inside doPost.
+ */
 async function apiPost(body) {
   const res = await fetch(SCRIPT_URL, {
     method: "POST",
@@ -136,6 +179,7 @@ async function apiPost(body) {
 
 // ─── Small shared components ──────────────────────────────────────────────────
 
+/** Renders a row of filled/empty dot pips representing goal completion. */
 function ScorePips({ checked, total }) {
   return React.createElement("span", { style: { display: "flex", gap: 4, alignItems: "center" } },
     Array.from({ length: total }).map((_, i) =>
@@ -147,6 +191,7 @@ function ScorePips({ checked, total }) {
   );
 }
 
+/** Colored pill badge for a match result (Win / Lose / Draw). */
 function Badge({ label }) {
   const s = RESULT_STYLE[label] || { background: "var(--surface2)", color: "var(--text2)" };
   return React.createElement("span", {
@@ -160,6 +205,7 @@ function Spinner() {
   );
 }
 
+/** Small all-caps section header used throughout the settings tab. */
 function SectionLabel({ children }) {
   return React.createElement("div", {
     style: { fontSize: 11, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }
@@ -168,6 +214,7 @@ function SectionLabel({ children }) {
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
 
+/** Summary bar showing match counts, win rate, and average goals for a set of entries. */
 function StatsBar({ entries, goalCount }) {
   if (!entries.length) return null;
   const wins   = entries.filter(e => e.result === "Win").length;
@@ -241,8 +288,10 @@ function TabBar({ active, onChange }) {
 }
 
 // ─── Sliding tab container ────────────────────────────────────────────────────
-// Mirrors the food-tracker approach: all panels laid out side-by-side in a flex
-// row, viewport moved with translateX. Touch-move drags live; touchend snaps.
+// All three tab panels are rendered side-by-side in a flex row at 100% width
+// each. The visible panel is controlled by translateX on the inner container.
+// Touch-move drags the panels live; touchend snaps to the nearest tab.
+// The outer div has overflow:hidden to clip the off-screen panels.
 
 function TabSlider({ tab, setTab, setDailyDate, children }) {
   const tabIdx      = TABS.indexOf(tab);
@@ -261,7 +310,9 @@ function TabSlider({ tab, setTab, setDailyDate, children }) {
 
   const onTouchStart = e => {
     const x = e.touches[0].clientX;
-    if (x < 20 || x > window.innerWidth - 20) return; // ignore edge swipes (Android back)
+    // Ignore touches starting within 20px of either edge — that's the Android
+    // system back-gesture zone and we don't want to intercept it.
+    if (x < 20 || x > window.innerWidth - 20) return;
     touchRef.current = { x, y: e.touches[0].clientY, time: Date.now(), swiping: false };
   };
 
@@ -270,6 +321,7 @@ function TabSlider({ tab, setTab, setDailyDate, children }) {
     if (!t) return;
     const dx = e.touches[0].clientX - t.x;
     const dy = e.touches[0].clientY - t.y;
+    // Only activate horizontal swipe if clearly more horizontal than vertical
     if (!t.swiping && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) t.swiping = true;
     if (!t.swiping) return;
     const el = sliderRef.current;
@@ -285,10 +337,10 @@ function TabSlider({ tab, setTab, setDailyDate, children }) {
     touchRef.current = null;
     const dx = e.changedTouches[0].clientX - t.x;
     const dt = Date.now() - t.time;
+    // A flick is a fast short swipe or a longer slow drag
     const isFlick = Math.abs(dx) > 40 || (Math.abs(dx) > 20 && dt < 250);
     let nextIdx = tabIdxRef.current;
     if (isFlick) nextIdx = dx < 0 ? Math.min(TABS.length - 1, nextIdx + 1) : Math.max(0, nextIdx - 1);
-    // Always animate the snap
     const el = sliderRef.current;
     if (el) {
       el.style.transition = "transform 0.3s cubic-bezier(0.32,0.72,0,1)";
@@ -321,7 +373,7 @@ function TabSlider({ tab, setTab, setDailyDate, children }) {
 // ─── Compact date nav (header area) ──────────────────────────────────────────
 
 function DateNav({ date, onChange }) {
-  const isToday = date === todayStr();
+  const atLatest = date >= todayStr(); // true when already at today or beyond
   const inputRef = React.useRef(null);
   return React.createElement("div", { className: "date-nav-compact" },
     React.createElement("button", {
@@ -349,8 +401,8 @@ function DateNav({ date, onChange }) {
     React.createElement("button", {
       className: "date-nav-arrow",
       onClick: () => onChange(offsetDate(date, 1)),
-      disabled: isToday,
-      style: { opacity: isToday ? 0.3 : 1 },
+      disabled: atLatest,
+      style: { opacity: atLatest ? 0.3 : 1 },
     }, "›")
   );
 }
@@ -369,50 +421,42 @@ function DailyTab({ entries, goals, date, onOpen, onLog }) {
 // ─── History tab ──────────────────────────────────────────────────────────────
 
 function HistoryTab({ entries, goals, formats, onOpen, onLog }) {
-  const [fmts,     setFmts]     = useState([]); // multi-select: array of names
-  const [results,  setResults]  = useState([]); // multi-select
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo,   setDateTo]   = useState("");
+  const [selectedFormats, setSelectedFormats] = useState([]); // active format filter (multi-select)
+  const [results,         setResults]         = useState([]); // active result filter (multi-select)
+  const [dateFrom,        setDateFrom]        = useState("");
+  const [dateTo,          setDateTo]          = useState("");
 
   const activeNames = formats.filter(f => f.active).map(f => f.name);
 
-  const toggleResult = r => { setResults(prev => prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]); };
-  const toggleFmt = name => {
-    setFmts(prev => prev.includes(name) ? prev.filter(f => f !== name) : [...prev, name]);
-  };
+  const toggleResult = r => setResults(prev => prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]);
+  const toggleFormat = name => setSelectedFormats(prev => prev.includes(name) ? prev.filter(f => f !== name) : [...prev, name]);
 
   const filtered = entries.filter(e => {
-    if (fmts.length && !fmts.includes(e.format)) return false;
-    if (results.length && !results.includes(e.result)) return false;
-    if (dateFrom && e.date   <  dateFrom)         return false;
-    if (dateTo   && e.date   >  dateTo)           return false;
+    if (selectedFormats.length && !selectedFormats.includes(e.format)) return false;
+    if (results.length         && !results.includes(e.result))         return false;
+    if (dateFrom && e.date < dateFrom) return false;
+    if (dateTo   && e.date > dateTo)   return false;
     return true;
   }).sort((a, b) => b.id - a.id);
 
-  const hasFilters = fmts.length || results.length || dateFrom || dateTo;
-
-  const RESULT_PILL = {
-    Win:  { sel: { background: "#d1fae5", color: "#065f46", border: "1.5px solid #059669" } },
-    Lose: { sel: { background: "#fee2e2", color: "#991b1b", border: "1.5px solid #dc2626" } },
-    Draw: { sel: { background: "#fef9c3", color: "#854d0e", border: "1.5px solid #d97706" } },
-  };
+  const hasFilters = selectedFormats.length || results.length || dateFrom || dateTo;
 
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 12 } },
 
-    // Format multi-select pills
+    // Format filter
     React.createElement("div", null,
       React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 } }, "Format"),
       React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
         activeNames.map(name => {
-          const sel = fmts.includes(name);
+          const sel = selectedFormats.includes(name);
           return React.createElement("button", {
             key: name,
-            onClick: () => toggleFmt(name),
+            onClick: () => toggleFormat(name),
             style: {
               padding: "5px 12px", borderRadius: 20, fontSize: 13, fontWeight: 500, cursor: "pointer",
               background: sel ? "var(--accent-light)" : "var(--surface)",
-              color: sel ? "var(--accent-text)" : "var(--text2)",
-              border: sel ? "1.5px solid var(--accent)" : "1px solid var(--border)",
+              color:      sel ? "var(--accent-text)"  : "var(--text2)",
+              border:     sel ? "1.5px solid var(--accent)" : "1px solid var(--border)",
               transition: "all 0.12s",
             }
           }, name);
@@ -420,13 +464,16 @@ function HistoryTab({ entries, goals, formats, onOpen, onLog }) {
       )
     ),
 
-    // Result filter pills
+    // Result filter
     React.createElement("div", null,
       React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 } }, "Result"),
       React.createElement("div", { style: { display: "flex", gap: 6 } },
         RESULTS.map(r => {
           const sel = results.includes(r);
-          const style = sel ? RESULT_PILL[r].sel : { background: "var(--surface)", color: "var(--text2)", border: "1px solid var(--border)" };
+          const s   = RESULT_STYLE[r];
+          const style = sel
+            ? { background: s.background, color: s.color, border: `1.5px solid ${s.border}` }
+            : { background: "var(--surface)", color: "var(--text2)", border: "1px solid var(--border)" };
           return React.createElement("button", {
             key: r,
             onClick: () => toggleResult(r),
@@ -436,7 +483,7 @@ function HistoryTab({ entries, goals, formats, onOpen, onLog }) {
       )
     ),
 
-    // Date range row
+    // Date range filter
     React.createElement("div", null,
       React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 } }, "Date range"),
       React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
@@ -460,7 +507,7 @@ function HistoryTab({ entries, goals, formats, onOpen, onLog }) {
           }, "End")
         ),
         hasFilters && React.createElement("button", {
-          onClick: () => { setFmts([]); setResults([]); setDateFrom(""); setDateTo(""); },
+          onClick: () => { setSelectedFormats([]); setResults([]); setDateFrom(""); setDateTo(""); },
           style: { fontSize: 12, padding: "5px 10px", color: "var(--text2)", background: "none", border: "none", cursor: "pointer", whiteSpace: "nowrap" }
         }, "Clear")
       )
@@ -473,23 +520,29 @@ function HistoryTab({ entries, goals, formats, onOpen, onLog }) {
 }
 
 // ─── Draggable format list ────────────────────────────────────────────────────
+// Each row has a drag handle (⠿). Dragging it lifts the row into a floating
+// ghost (rendered via portal to escape the TabSlider's CSS transform, which
+// would otherwise break position:fixed). The original row turns invisible and
+// surrounding rows shift with translateY to show where the item will land.
 
-const ROW_H = 52; // px per row including gap
+const ROW_H = 52; // px per row including gap — used to compute ghost position and row shifts
 
 function FormatList({ formats, onChange }) {
-  const [editing,  setEditing]  = useState(null);
+  const [editing,  setEditing]  = useState(null); // index of the row being renamed
   const [editVal,  setEditVal]  = useState("");
-  const [dragging, setDragging] = useState(null);
-  const [dragY,    setDragY]    = useState(0);
-  const [overIdx,  setOverIdx]  = useState(null);
+  const [dragging, setDragging] = useState(null); // index of the row being dragged
+  const [dragY,    setDragY]    = useState(0);    // current cursor Y (viewport coords)
+  const [overIdx,  setOverIdx]  = useState(null); // index the dragged item would land on
   const listRef    = useRef(null);
+  // Refs mirror state so touch event handlers (which close over stale state) can
+  // still read the current values without needing to be re-registered.
   const draggingRef = useRef(null);
   const overIdxRef  = useRef(null);
 
-  // Keep refs in sync for touch handlers
   useEffect(() => { draggingRef.current = dragging; }, [dragging]);
   useEffect(() => { overIdxRef.current  = overIdx;  }, [overIdx]);
 
+  /** Returns the index the dragged row should land on given a viewport Y. */
   const getOverIdx = (clientY) => {
     if (!listRef.current) return 0;
     const rows = [...listRef.current.querySelectorAll("[data-fmt-row]")];
@@ -500,17 +553,9 @@ function FormatList({ formats, onChange }) {
     return rows.length - 1;
   };
 
-  const startDrag = (clientY, i) => {
-    setDragging(i); setDragY(clientY); setOverIdx(i);
-  };
-
-  const moveDrag = (clientY) => {
-    if (draggingRef.current === null) return;
-    setDragY(clientY);
-    setOverIdx(getOverIdx(clientY));
-  };
-
-  const endDrag = () => {
+  const startDrag = (clientY, i) => { setDragging(i); setDragY(clientY); setOverIdx(i); };
+  const moveDrag  = (clientY)    => { if (draggingRef.current === null) return; setDragY(clientY); setOverIdx(getOverIdx(clientY)); };
+  const endDrag   = ()           => {
     const from = draggingRef.current;
     const to   = overIdxRef.current;
     if (from !== null && to !== null && from !== to) {
@@ -522,16 +567,16 @@ function FormatList({ formats, onChange }) {
     setDragging(null); setOverIdx(null);
   };
 
-  // Compute per-row translateY shift so rows slide around the dragged item
+  /**
+   * Returns the translateY offset (px) for row `i` while a drag is in progress.
+   * Rows between the drag origin and the current hover target slide to make room.
+   */
   const getShift = (i) => {
     if (dragging === null || overIdx === null || i === dragging) return 0;
-    // The dragged item is moving from `dragging` to `overIdx`
     if (dragging < overIdx) {
-      // Dragging downward: rows between drag+1..overIdx shift up by one row
-      if (i > dragging && i <= overIdx) return -ROW_H;
+      if (i > dragging && i <= overIdx) return -ROW_H; // dragging down: rows above shift up
     } else {
-      // Dragging upward: rows between overIdx..drag-1 shift down by one row
-      if (i >= overIdx && i < dragging) return ROW_H;
+      if (i >= overIdx && i < dragging) return ROW_H;  // dragging up: rows below shift down
     }
     return 0;
   };
@@ -548,9 +593,8 @@ function FormatList({ formats, onChange }) {
 
   return React.createElement("div", { style: { position: "relative" } },
 
-    // Floating ghost row that follows the cursor
-    // Rendered via portal so it escapes the tab slider's CSS transform (which would
-    // otherwise break position:fixed, causing the ghost to be clipped/invisible).
+    // Ghost row: floats at the cursor, rendered via portal so it escapes the
+    // TabSlider's CSS transform (which breaks position:fixed for descendants).
     ghostFmt && ReactDOM.createPortal(React.createElement("div", {
       style: {
         position: "fixed",
@@ -574,7 +618,7 @@ function FormatList({ formats, onChange }) {
       React.createElement("span", { style: {
         fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20,
         background: ghostFmt.active ? "var(--accent-light)" : "var(--surface2)",
-        color: ghostFmt.active ? "var(--accent-text)" : "var(--text3)",
+        color:      ghostFmt.active ? "var(--accent-text)"  : "var(--text3)",
       } }, ghostFmt.active ? "Active" : "Hidden")
     ), document.body),
 
@@ -588,12 +632,14 @@ function FormatList({ formats, onChange }) {
       formats.map((f, i) => {
         const isDragged = dragging === i;
         const shift = getShift(i);
+        // key: f.name (not index) so React correctly reconciles rows after
+        // reorder/delete and doesn't assign edit state to the wrong row.
         return React.createElement("div", {
-          key: i,
+          key: f.name,
           "data-fmt-row": true,
           style: {
             background: "var(--surface)",
-            border: `1px solid var(--border)`,
+            border: "1px solid var(--border)",
             borderRadius: "var(--radius-sm)",
             padding: "10px 12px",
             display: "flex", alignItems: "center", gap: 10,
@@ -635,7 +681,7 @@ function FormatList({ formats, onChange }) {
             style: {
               fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20,
               background: f.active ? "var(--accent-light)" : "var(--surface2)",
-              color: f.active ? "var(--accent-text)" : "var(--text3)",
+              color:      f.active ? "var(--accent-text)"  : "var(--text3)",
               border: "none", cursor: "pointer", flexShrink: 0,
             }
           }, f.active ? "Active" : "Hidden"),
@@ -664,7 +710,9 @@ function SettingsTab({ settings, onSave }) {
 
   useEffect(() => { applyTheme(accent, darkMode); }, [accent, darkMode]);
 
-  // Auto-save whenever any setting changes (skip initial mount)
+  // Auto-save to localStorage and propagate to App whenever any setting changes.
+  // Skips the initial mount so we don't overwrite settings that just loaded.
+  // Also background-syncs to the sheet; failures are silent (Sync Now can retry).
   useEffect(() => {
     if (!mounted.current) { mounted.current = true; return; }
     const s = { ...settings, formats, goals, accent, darkMode };
@@ -683,12 +731,13 @@ function SettingsTab({ settings, onSave }) {
 
   const setGoal = (i, v) => setGoals(goals.map((g, j) => j === i ? v : g));
 
+  /** Manually triggers a sheet sync for settings with visible status feedback. */
   const syncNow = () => {
     const s = { ...settings, formats, goals, accent, darkMode };
     setSyncStatus("syncing");
     apiPost({ action: "saveSettings", settings: s })
-      .then(() => { setSyncStatus("ok"); setTimeout(() => setSyncStatus(null), 2500); })
-      .catch(() => { setSyncStatus("error"); setTimeout(() => setSyncStatus(null), 2500); });
+      .then(()  => { setSyncStatus("ok");    setTimeout(() => setSyncStatus(null), 2500); })
+      .catch(()  => { setSyncStatus("error"); setTimeout(() => setSyncStatus(null), 2500); });
   };
 
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 28 } },
@@ -773,45 +822,56 @@ function SettingsTab({ settings, onSave }) {
 
 // ─── Log form ─────────────────────────────────────────────────────────────────
 
-function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, saving, onFormatChange }) {
+/**
+ * Used for both new entries and edits. When `initial` is provided the form
+ * is pre-populated; goal booleans are normalized to the current goals list
+ * length (padded with false or truncated) in case the user has changed their
+ * goals since the entry was first saved.
+ */
+function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onFormatChange }) {
   const activeFormats = settings.formats.filter(f => f.active).map(f => f.name);
   const goals = settings.goals;
 
-  // Pick default format: initial.format if editing, else lastFormat if still valid, else first
+  // Pick default format: existing format when editing, else last-used if still
+  // active, else first active format.
   const defaultFormat = initial
     ? initial.format
     : (activeFormats.includes(settings.lastFormat) ? settings.lastFormat : activeFormats[0] || "");
 
-  const [form, setForm] = useState(initial || {
-    date: defaultDate || todayStr(),
-    format: defaultFormat,
-    result: "", notes: "",
-    goals: Array(goals.length).fill(false),
-  });
+  // Normalize saved goal booleans to match the current goals list length.
+  // If goals were added since the entry was saved, new ones default to false.
+  // If goals were removed, the array is truncated.
+  const normalizeGoals = (saved, count) =>
+    [...saved, ...Array(Math.max(0, count - saved.length)).fill(false)].slice(0, count);
+
+  const [form, setForm] = useState(initial
+    ? { ...initial, goals: normalizeGoals(initial.goals, goals.length) }
+    : { date: defaultDate || todayStr(), format: defaultFormat, result: "", notes: "", goals: Array(goals.length).fill(false) }
+  );
   const [validationError, setValidationError] = useState("");
 
   const toggle = i => {
-    const g = [...form.goals];
-    g[i] = !g[i];
-    setForm(f => ({ ...f, goals: g }));
+    // Use functional form to avoid reading stale form.goals from closure
+    setForm(f => {
+      const g = [...f.goals];
+      g[i] = !g[i];
+      return { ...f, goals: g };
+    });
   };
+
   const set = (k, v) => {
     setForm(f => ({ ...f, [k]: v }));
+    // Side-effect: persist the selected format as the new default for future entries
     if (k === "format") onFormatChange(v);
     if (k === "result" || k === "date") setValidationError("");
   };
+
   const score = form.goals.filter(Boolean).length;
 
   const handleSave = () => {
     if (!form.result) { setValidationError("Please select a result."); return; }
     if (!form.date)   { setValidationError("Please select a date.");   return; }
     onSave(form);
-  };
-
-  const RESULT_COLORS = {
-    Win:  { bg: "#d1fae5", border: "#059669", text: "#065f46" },
-    Lose: { bg: "#fee2e2", border: "#dc2626", text: "#991b1b" },
-    Draw: { bg: "#fef9c3", border: "#d97706", text: "#854d0e" },
   };
 
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 20 } },
@@ -836,7 +896,7 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, sav
       React.createElement("label", null, "Result"),
       React.createElement("div", { style: { display: "flex", gap: 8 } },
         RESULTS.map(r => {
-          const col = RESULT_COLORS[r];
+          const s        = RESULT_STYLE[r];
           const selected = form.result === r;
           return React.createElement("button", {
             key: r,
@@ -844,9 +904,9 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, sav
             style: {
               flex: 1, padding: "10px 0", fontWeight: 600, fontSize: 14,
               borderRadius: "var(--radius-sm)",
-              border: selected ? `2px solid ${col.border}` : "1.5px solid var(--border)",
-              background: selected ? col.bg : "var(--surface)",
-              color: selected ? col.text : "var(--text2)",
+              border:      selected ? `2px solid ${s.border}`    : "1.5px solid var(--border)",
+              background:  selected ? s.background               : "var(--surface)",
+              color:       selected ? s.color                     : "var(--text2)",
               cursor: "pointer", transition: "all 0.12s",
             }
           }, r);
@@ -889,18 +949,22 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, sav
       validationError && React.createElement("span", {
         style: { flex: 1, fontSize: 13, color: "#dc2626" }
       }, validationError),
-      React.createElement("button", { className: "btn-ghost", onClick: onCancel, disabled: saving }, "Cancel"),
+      React.createElement("button", { className: "btn-ghost", onClick: onCancel }, "Cancel"),
       React.createElement("button", {
-        className: "btn-primary", onClick: handleSave, disabled: saving,
-      }, saving ? "Saving…" : (isEdit ? "Save changes" : "Log entry"))
+        className: "btn-primary", onClick: handleSave,
+      }, isEdit ? "Save changes" : "Log entry")
     )
   );
 }
 
 // ─── Detail view ──────────────────────────────────────────────────────────────
 
-function DetailView({ entry, goals, onEdit, onDelete, onBack, deleting }) {
+function DetailView({ entry, goals, onEdit, onDelete, onBack }) {
   const score = entry.goals.filter(Boolean).length;
+  // If the current goals list length doesn't match the entry's saved goals, fall
+  // back to DEFAULT_GOALS labels so the checkmarks still display with some text.
+  // This can happen if goals were added or removed in Settings after the entry
+  // was logged. The goal boolean values (checked/unchecked) are always correct.
   const displayGoals = goals.length === entry.goals.length ? goals : DEFAULT_GOALS;
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
     React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
@@ -932,8 +996,8 @@ function DetailView({ entry, goals, onEdit, onDelete, onBack, deleting }) {
       React.createElement("p", { style: { margin: 0, fontSize: 14, lineHeight: 1.6, color: "var(--text)" } }, entry.notes)
     ),
     React.createElement("div", { style: { display: "flex", gap: 10, justifyContent: "flex-end" } },
-      React.createElement("button", { className: "btn-danger", onClick: onDelete, disabled: deleting }, deleting ? "Deleting…" : "Delete"),
-      React.createElement("button", { className: "btn-ghost", onClick: onEdit }, "Edit")
+      React.createElement("button", { className: "btn-danger", onClick: onDelete }, "Delete"),
+      React.createElement("button", { className: "btn-ghost",  onClick: onEdit  }, "Edit")
     )
   );
 }
@@ -944,24 +1008,25 @@ function App() {
   const [settings,  setSettings]  = useState(loadSettings);
   const [entries,   setEntries]   = useState(() => cacheLoad().sort((a, b) => b.id - a.id));
   const [tab,       setTab]       = useState("Daily");
-  const [view,      setView]      = useState("tabs");
+  const [view,      setView]      = useState("tabs");  // "tabs" | "log" | "detail" | "edit"
   const [dailyDate, setDailyDate] = useState(todayStr);
-  const [selected,  setSelected]  = useState(null);
-  const [loading,   setLoading]   = useState(true);  // true only on very first load (no cache)
-  const [syncing,   setSyncing]   = useState(false);  // background sync indicator
-  const [saving,    setSaving]    = useState(false);
-  const [deleting,  setDeleting]  = useState(false);
+  const [selected,  setSelected]  = useState(null);   // the entry open in detail/edit view
+  const [loading,   setLoading]   = useState(true);   // true only on first load when cache is empty
+  const [syncing,   setSyncing]   = useState(false);
   const [error,     setError]     = useState(null);
+  // Note: saving/deleting states were removed. All data mutations are optimistic
+  // (UI updates synchronously before the API call), so these states never rendered
+  // in a non-false value and served no functional purpose.
 
-  // Android back gesture: push a history entry when entering non-tabs views,
-  // and intercept popstate to cancel/go back within the app instead of the browser.
+  // Android back gesture: push a history entry when entering a detail/form view
+  // so the device back button navigates within the app instead of leaving it.
   useEffect(() => {
     if (view !== "tabs") history.pushState({ appView: view }, "");
   }, [view]);
 
   useEffect(() => {
     const handler = () => {
-      if (view === "log")    setView("tabs");
+      if      (view === "log")    setView("tabs");
       else if (view === "edit")   setView("detail");
       else if (view === "detail") { setSelected(null); setView("tabs"); }
     };
@@ -969,23 +1034,24 @@ function App() {
     return () => window.removeEventListener("popstate", handler);
   }, [view]);
 
-  // Keep cache in sync whenever entries change
-  const setAndCache = updated => {
-    setEntries(updated);
-    cacheSave(updated);
-  };
+  /** Updates entries in React state and the localStorage cache atomically. */
+  const setAndCache = updated => { setEntries(updated); cacheSave(updated); };
 
+  // On mount: apply theme, show cached data immediately if available, then sync
+  // from the sheet in the background and merge any sheet settings.
   useEffect(() => {
     applyTheme(settings.accent, settings.darkMode);
     const hasCached = cacheLoad().length > 0;
-    // If we have cached data, show it immediately and don't block with spinner
     if (hasCached) setLoading(false);
     setSyncing(true);
     apiGet()
       .then(({ entries: data, settings: sheetSettings }) => {
-        const clean = data.map(e => ({ ...e, date: String(e.date).slice(0, 10) }));
-        const sorted = clean.sort((a, b) => b.id - a.id);
+        const sorted = data
+          .map(e => ({ ...e, date: String(e.date).slice(0, 10) }))
+          .sort((a, b) => b.id - a.id);
         setAndCache(sorted);
+        // If the sheet has settings (requires a redeployed script), merge them
+        // over local settings so changes made on other devices take effect.
         if (sheetSettings) {
           const merged = { ...loadSettings(), ...sheetSettings };
           saveSettings(merged);
@@ -994,7 +1060,6 @@ function App() {
         }
       })
       .catch(() => {
-        // If we have cached data, silently fail; otherwise show error
         if (!hasCached) setError("Couldn't load entries. Check your script URL.");
       })
       .finally(() => { setLoading(false); setSyncing(false); });
@@ -1005,50 +1070,45 @@ function App() {
     setTab(t);
   };
 
-  // ── Persist last-used format ──
+  /** Persists the last-used format so new entries default to it. */
   const handleFormatChange = fmt => {
     const updated = { ...settings, lastFormat: fmt };
     saveSettings(updated);
     setSettings(updated);
   };
 
-  // ── Data ops — optimistic local-first ──
+  // ── Data mutations (optimistic local-first) ───────────────────────────────
+  // Each mutation updates local state + cache immediately, then fires the sheet
+  // sync in the background. A visible error is shown if the sync fails, but the
+  // local change is kept — it will be in sync after the next successful apiGet.
+
   const saveNew = async form => {
-    setSaving(true); setError(null);
+    setError(null);
     const entry = { ...form, id: Date.now() };
-    // Optimistic: update UI + cache immediately
     setAndCache([entry, ...entries]);
     setView("tabs");
-    setSaving(false);
-    // Background sync to sheet
     apiPost({ action: "create", entry }).catch(() => {
       setError("Saved locally but sheet sync failed. It will retry on next load.");
     });
   };
 
   const saveEdit = async form => {
-    setSaving(true); setError(null);
+    setError(null);
     const updated = { ...form, id: selected.id };
-    // Optimistic update
     setAndCache(entries.map(e => e.id === selected.id ? updated : e));
     setSelected(updated);
     setView("detail");
-    setSaving(false);
-    // Background sync
     apiPost({ action: "update", entry: updated }).catch(() => {
       setError("Saved locally but sheet sync failed.");
     });
   };
 
   const deleteEntry = async () => {
-    setDeleting(true); setError(null);
+    setError(null);
     const id = selected.id;
-    // Optimistic delete
     setAndCache(entries.filter(e => e.id !== id));
     setSelected(null);
     setView("tabs");
-    setDeleting(false);
-    // Background sync
     apiPost({ action: "delete", id }).catch(() => {
       setError("Deleted locally but sheet sync failed.");
     });
@@ -1066,35 +1126,35 @@ function App() {
       }, "×")
     ),
 
+    // Syncing indicator — portal so it's always visible regardless of current view
+    ReactDOM.createPortal(
+      React.createElement("div", {
+        style: {
+          position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)",
+          background: "var(--surface2)", border: "1px solid var(--border)",
+          borderRadius: 20, padding: "5px 14px",
+          display: "flex", alignItems: "center", gap: 5,
+          fontSize: 12, color: "var(--text3)",
+          pointerEvents: "none", zIndex: 999,
+          opacity: syncing ? 1 : 0,
+          transition: "opacity 0.3s",
+        }
+      },
+        React.createElement("span", { className: "sync-dot" }),
+        "syncing"
+      ),
+      document.body
+    ),
+
     // ── Tabs view ──
     view === "tabs" && React.createElement(React.Fragment, null,
 
-      // Header: title + date nav side by side (only on Daily tab)
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.12"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.13"),
         ),
         tab === "Daily" && React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
-      ),
-
-      ReactDOM.createPortal(
-        React.createElement("div", {
-          style: {
-            position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)",
-            background: "var(--surface2)", border: "1px solid var(--border)",
-            borderRadius: 20, padding: "5px 14px",
-            display: "flex", alignItems: "center", gap: 5,
-            fontSize: 12, color: "var(--text3)",
-            pointerEvents: "none", zIndex: 999,
-            opacity: syncing ? 1 : 0,
-            transition: "opacity 0.3s",
-          }
-        },
-          React.createElement("span", { className: "sync-dot" }),
-          "syncing"
-        ),
-        document.body
       ),
 
       React.createElement(TabBar, { active: tab, onChange: changeTab }),
@@ -1102,7 +1162,6 @@ function App() {
       loading
         ? React.createElement(Spinner)
         : React.createElement(TabSlider, { tab, setTab: changeTab, setDailyDate },
-            // All 3 panels always rendered side-by-side; slider translateX picks which is visible
             React.createElement("div", { style: { minWidth: "100%", width: "100%", padding: "0 8px" } },
               React.createElement(DailyTab, {
                 entries, goals, date: dailyDate,
@@ -1111,7 +1170,11 @@ function App() {
               })
             ),
             React.createElement("div", { style: { minWidth: "100%", width: "100%", padding: "0 8px" } },
-              React.createElement(HistoryTab, { entries, goals, formats, onOpen: entry => { setSelected(entry); setView("detail"); }, onLog: () => setView("log") })
+              React.createElement(HistoryTab, {
+                entries, goals, formats,
+                onOpen: entry => { setSelected(entry); setView("detail"); },
+                onLog:  () => setView("log"),
+              })
             ),
             React.createElement("div", { style: { minWidth: "100%", width: "100%", padding: "0 8px" } },
               React.createElement(SettingsTab, { settings, onSave: s => setSettings(s) })
@@ -1119,7 +1182,7 @@ function App() {
           )
     ),
 
-    // ── Log form ──
+    // ── Log new entry ──
     view === "log" && React.createElement(React.Fragment, null,
       React.createElement("div", { style: { marginBottom: 20 } },
         React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "Log a match"),
@@ -1127,27 +1190,27 @@ function App() {
       ),
       React.createElement(LogForm, {
         settings, defaultDate: dailyDate,
-        onSave: saveNew, onCancel: () => setView("tabs"), saving,
+        onSave: saveNew, onCancel: () => setView("tabs"),
         onFormatChange: handleFormatChange,
       })
     ),
 
-    // ── Detail ──
+    // ── Entry detail ──
     view === "detail" && selected && React.createElement(DetailView, {
       entry: selected, goals,
       onBack:   () => { setSelected(null); setView("tabs"); },
       onEdit:   () => setView("edit"),
-      onDelete: deleteEntry, deleting,
+      onDelete: deleteEntry,
     }),
 
-    // ── Edit ──
+    // ── Edit entry ──
     view === "edit" && selected && React.createElement(React.Fragment, null,
       React.createElement("div", { style: { marginBottom: 20 } },
         React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "Edit entry")
       ),
       React.createElement(LogForm, {
-        initial: selected, settings,
-        onSave: saveEdit, onCancel: () => setView("detail"), isEdit: true, saving,
+        initial: selected, settings, isEdit: true,
+        onSave: saveEdit, onCancel: () => setView("detail"),
         onFormatChange: handleFormatChange,
       })
     )

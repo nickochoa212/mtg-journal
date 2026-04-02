@@ -1,10 +1,15 @@
-// Paste this entire file into your Google Apps Script editor.
-// Tools → Script Editor (from Google Sheets)
+// ─── MTG Journal — Google Apps Script backend ─────────────────────────────────
+// Deployed as a Web App (Execute as: Me, Who has access: Anyone).
+// doGet  → returns all entries + settings as JSON.
+// doPost → handles create / update / delete / saveSettings actions.
 
-const SHEET_NAME = "Entries";
+const SHEET_NAME          = "Entries";
 const SETTINGS_SHEET_NAME = "Settings";
 const HEADERS = ["id", "date", "format", "result", "notes", "g1", "g2", "g3", "g4", "g5"];
 
+// ─── Sheet helpers ────────────────────────────────────────────────────────────
+
+/** Returns the Entries sheet, creating it with a header row if it doesn't exist. */
 function getSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(SHEET_NAME);
@@ -16,8 +21,18 @@ function getSheet() {
   return sheet;
 }
 
-// Google Sheets auto-converts date strings to Date objects.
-// This formats them back to plain YYYY-MM-DD strings.
+/** Returns the Settings sheet, creating it if it doesn't exist. */
+function getSettingsSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(SETTINGS_SHEET_NAME);
+  if (!sheet) sheet = ss.insertSheet(SETTINGS_SHEET_NAME);
+  return sheet;
+}
+
+/**
+ * Google Sheets auto-converts date strings to Date objects when reading cells.
+ * This normalizes them back to plain YYYY-MM-DD strings.
+ */
 function cellDate(val) {
   if (val instanceof Date) {
     return Utilities.formatDate(val, Session.getScriptTimeZone(), "yyyy-MM-dd");
@@ -26,16 +41,20 @@ function cellDate(val) {
   return s.length > 10 ? s.slice(0, 10) : s;
 }
 
-function getSettingsSheet() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName(SETTINGS_SHEET_NAME);
-  if (!sheet) sheet = ss.insertSheet(SETTINGS_SHEET_NAME);
-  return sheet;
-}
+// ─── Request handlers ─────────────────────────────────────────────────────────
 
+/**
+ * GET handler — returns all entries and saved settings as JSON.
+ *
+ * Response shape: { entries: Entry[], settings: SettingsObject | null }
+ *
+ * `settings` is null if the Settings sheet is empty (e.g. before the first
+ * saveSettings call or on a fresh deployment). The client handles this by
+ * falling back to its localStorage copy.
+ */
 function doGet(e) {
   const sheet = getSheet();
-  const rows = sheet.getDataRange().getValues();
+  const rows  = sheet.getDataRange().getValues();
   const entries = rows.slice(1)
     .filter(r => r[0] !== "")
     .map(r => ({
@@ -55,8 +74,17 @@ function doGet(e) {
   return json({ entries, settings });
 }
 
+/**
+ * POST handler — dispatches on body.action.
+ *
+ * Actions:
+ *   create       — appends a new entry row.
+ *   update       — overwrites an existing row matched by id.
+ *   delete       — deletes the row matched by id.
+ *   saveSettings — writes the settings JSON blob to Settings!A1.
+ */
 function doPost(e) {
-  const body = JSON.parse(e.postData.contents);
+  const body  = JSON.parse(e.postData.contents);
   const sheet = getSheet();
 
   if (body.action === "create") {
@@ -75,9 +103,6 @@ function doPost(e) {
       }
     }
 
-  } else if (body.action === "saveSettings") {
-    getSettingsSheet().getRange("A1").setValue(JSON.stringify(body.settings));
-
   } else if (body.action === "delete") {
     const rows = sheet.getDataRange().getValues();
     for (let i = 1; i < rows.length; i++) {
@@ -86,10 +111,19 @@ function doPost(e) {
         break;
       }
     }
+
+  } else if (body.action === "saveSettings") {
+    getSettingsSheet().getRange("A1").setValue(JSON.stringify(body.settings));
+
+  } else {
+    Logger.log("doPost: unknown action: " + body.action);
+    return json({ ok: false, error: "Unknown action: " + body.action });
   }
 
   return json({ ok: true });
 }
+
+// ─── Utility ──────────────────────────────────────────────────────────────────
 
 function json(data) {
   return ContentService
