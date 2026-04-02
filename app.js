@@ -11,7 +11,7 @@ const DEFAULT_GOALS = [
 ];
 
 const DEFAULT_FORMATS = [
-  { name: "DC",        active: true },
+  { name: "Duel Commander", active: true },
   { name: "Pauper",    active: true },
   { name: "Legacy",    active: true },
   { name: "Premodern", active: true },
@@ -78,6 +78,7 @@ function loadSettings() {
     if (formats.length && typeof formats[0] === "string") {
       formats = formats.map(name => ({ name, active: true }));
     }
+    formats = formats.map(f => f.name === "DC" ? { ...f, name: "Duel Commander" } : f);
     return {
       formats,
       goals:      s.goals      || DEFAULT_GOALS,
@@ -120,7 +121,10 @@ function cacheSave(entries) {
 async function apiGet() {
   const res = await fetch(SCRIPT_URL);
   if (!res.ok) throw new Error("Failed");
-  return res.json();
+  const data = await res.json();
+  // Support both old (array) and new ({ entries, settings }) response shapes
+  if (Array.isArray(data)) return { entries: data, settings: null };
+  return data;
 }
 
 async function apiPost(body) {
@@ -668,6 +672,7 @@ function SettingsTab({ settings, onSave }) {
     const s = { ...settings, formats, goals, accent, darkMode };
     saveSettings(s);
     onSave(s);
+    apiPost({ action: "saveSettings", settings: s }).catch(() => {});
   }, [formats, goals, accent, darkMode]);
 
   const addFormat = () => {
@@ -962,10 +967,16 @@ function App() {
     if (hasCached) setLoading(false);
     setSyncing(true);
     apiGet()
-      .then(data => {
+      .then(({ entries: data, settings: sheetSettings }) => {
         const clean = data.map(e => ({ ...e, date: String(e.date).slice(0, 10) }));
         const sorted = clean.sort((a, b) => b.id - a.id);
         setAndCache(sorted);
+        if (sheetSettings) {
+          const merged = { ...loadSettings(), ...sheetSettings };
+          saveSettings(merged);
+          setSettings(merged);
+          applyTheme(merged.accent, merged.darkMode);
+        }
       })
       .catch(() => {
         // If we have cached data, silently fail; otherwise show error
@@ -1047,7 +1058,7 @@ function App() {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.8"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.9"),
           syncing && React.createElement("span", {
             style: { fontSize: 11, color: "var(--text3)", display: "flex", alignItems: "center", gap: 3 }
           },
