@@ -66,7 +66,7 @@ function offsetDate(str, days) {
 }
 
 function haptic() {
-  try { if (navigator.vibrate) navigator.vibrate(30); } catch {}
+  try { if (navigator.vibrate) navigator.vibrate(15); } catch {}
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
@@ -1058,15 +1058,28 @@ function App() {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.10"),
-          syncing && React.createElement("span", {
-            style: { fontSize: 11, color: "var(--text3)", display: "flex", alignItems: "center", gap: 3 }
-          },
-            React.createElement("span", { className: "sync-dot" }),
-            "syncing"
-          )
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.11"),
         ),
         tab === "Daily" && React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
+      ),
+
+      ReactDOM.createPortal(
+        React.createElement("div", {
+          style: {
+            position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)",
+            background: "var(--surface2)", border: "1px solid var(--border)",
+            borderRadius: 20, padding: "5px 14px",
+            display: "flex", alignItems: "center", gap: 5,
+            fontSize: 12, color: "var(--text3)",
+            pointerEvents: "none", zIndex: 999,
+            opacity: syncing ? 1 : 0,
+            transition: "opacity 0.3s",
+          }
+        },
+          React.createElement("span", { className: "sync-dot" }),
+          "syncing"
+        ),
+        document.body
       ),
 
       React.createElement(TabBar, { active: tab, onChange: changeTab }),
