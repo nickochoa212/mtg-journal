@@ -65,9 +65,6 @@ function offsetDate(str, days) {
   return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
 }
 
-function haptic() {
-  try { if (navigator.vibrate) navigator.vibrate(15); } catch {}
-}
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
@@ -657,11 +654,12 @@ function FormatList({ formats, onChange }) {
 // ─── Settings tab ─────────────────────────────────────────────────────────────
 
 function SettingsTab({ settings, onSave }) {
-  const [formats,  setFormats]  = useState(settings.formats);
-  const [goals,    setGoals]    = useState(settings.goals);
-  const [accent,   setAccent]   = useState(settings.accent);
-  const [darkMode, setDarkMode] = useState(settings.darkMode);
-  const [newFmt,   setNewFmt]   = useState("");
+  const [formats,    setFormats]    = useState(settings.formats);
+  const [goals,      setGoals]      = useState(settings.goals);
+  const [accent,     setAccent]     = useState(settings.accent);
+  const [darkMode,   setDarkMode]   = useState(settings.darkMode);
+  const [newFmt,     setNewFmt]     = useState("");
+  const [syncStatus, setSyncStatus] = useState(null); // null | "syncing" | "ok" | "error"
   const mounted = useRef(false);
 
   useEffect(() => { applyTheme(accent, darkMode); }, [accent, darkMode]);
@@ -684,6 +682,14 @@ function SettingsTab({ settings, onSave }) {
   };
 
   const setGoal = (i, v) => setGoals(goals.map((g, j) => j === i ? v : g));
+
+  const syncNow = () => {
+    const s = { ...settings, formats, goals, accent, darkMode };
+    setSyncStatus("syncing");
+    apiPost({ action: "saveSettings", settings: s })
+      .then(() => { setSyncStatus("ok"); setTimeout(() => setSyncStatus(null), 2500); })
+      .catch(() => { setSyncStatus("error"); setTimeout(() => setSyncStatus(null), 2500); });
+  };
 
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 28 } },
 
@@ -750,6 +756,18 @@ function SettingsTab({ settings, onSave }) {
       )
     ),
 
+    React.createElement("div", null,
+      React.createElement(SectionLabel, null, "Data"),
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
+        React.createElement("button", {
+          className: "btn-primary",
+          onClick: syncNow,
+          disabled: syncStatus === "syncing",
+        }, syncStatus === "syncing" ? "Syncing…" : syncStatus === "ok" ? "Synced ✓" : syncStatus === "error" ? "Sync failed" : "Sync now"),
+        syncStatus === "error" && React.createElement("span", { style: { fontSize: 12, color: "#dc2626" } }, "Check your script URL")
+      )
+    ),
+
   );
 }
 
@@ -773,7 +791,6 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, sav
   const [validationError, setValidationError] = useState("");
 
   const toggle = i => {
-    haptic();
     const g = [...form.goals];
     g[i] = !g[i];
     setForm(f => ({ ...f, goals: g }));
@@ -844,8 +861,6 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, sav
       goals.map((g, i) =>
         React.createElement("label", {
           key: i, className: "goal-row",
-          onTouchStart: () => haptic(),
-          onTouchEnd: e => { e.preventDefault(); toggle(i); },
           onClick: () => toggle(i),
         },
           React.createElement("span", {
@@ -1058,7 +1073,7 @@ function App() {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.11"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.12"),
         ),
         tab === "Daily" && React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
