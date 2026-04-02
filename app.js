@@ -604,9 +604,9 @@ function FormatList({ formats, onChange }) {
           React.createElement("span", {
             style: { fontSize: 18, color: "var(--text3)", cursor: "grab", flexShrink: 0, lineHeight: 1, touchAction: "none" },
             onMouseDown:  e => { e.preventDefault(); startDrag(e.clientY, i); },
-            onTouchStart: e => { e.preventDefault(); startDrag(e.touches[0].clientY, i); },
-            onTouchMove:  e => { e.preventDefault(); moveDrag(e.touches[0].clientY); },
-            onTouchEnd:   endDrag,
+            onTouchStart: e => { e.preventDefault(); e.stopPropagation(); startDrag(e.touches[0].clientY, i); },
+            onTouchMove:  e => { e.preventDefault(); e.stopPropagation(); moveDrag(e.touches[0].clientY); },
+            onTouchEnd:   e => { e.stopPropagation(); endDrag(); },
           }, "⠿"),
 
           editing === i
@@ -1073,17 +1073,17 @@ function App() {
         ? React.createElement(Spinner)
         : React.createElement(TabSlider, { tab, setTab: changeTab, setDailyDate },
             // All 3 panels always rendered side-by-side; slider translateX picks which is visible
-            React.createElement("div", { style: { minWidth: "100%", width: "100%" } },
+            React.createElement("div", { style: { minWidth: "100%", width: "100%", padding: "0 8px" } },
               React.createElement(DailyTab, {
                 entries, goals, date: dailyDate,
                 onOpen: entry => { setSelected(entry); setView("detail"); },
                 onLog:  () => setView("log"),
               })
             ),
-            React.createElement("div", { style: { minWidth: "100%", width: "100%" } },
+            React.createElement("div", { style: { minWidth: "100%", width: "100%", padding: "0 8px" } },
               React.createElement(HistoryTab, { entries, goals, formats, onOpen: entry => { setSelected(entry); setView("detail"); }, onLog: () => setView("log") })
             ),
-            React.createElement("div", { style: { minWidth: "100%", width: "100%" } },
+            React.createElement("div", { style: { minWidth: "100%", width: "100%", padding: "0 8px" } },
               React.createElement(SettingsTab, { settings, onSave: s => setSettings(s) })
             )
           )
