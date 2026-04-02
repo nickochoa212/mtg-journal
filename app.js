@@ -66,7 +66,10 @@ function offsetDate(str, days) {
 }
 
 function haptic() {
-  try { if (navigator.vibrate) navigator.vibrate(50); } catch {}
+  try {
+    const result = navigator.vibrate ? navigator.vibrate(200) : "API missing";
+    console.log("[haptic]", result, "vibrate available:", !!navigator.vibrate);
+  } catch(e) { console.log("[haptic] error", e); }
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
@@ -1047,7 +1050,7 @@ function App() {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.5"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.6"),
           syncing && React.createElement("span", {
             style: { fontSize: 11, color: "var(--text3)", display: "flex", alignItems: "center", gap: 3 }
           },
