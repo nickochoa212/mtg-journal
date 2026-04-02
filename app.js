@@ -943,6 +943,22 @@ function App() {
   const [deleting,  setDeleting]  = useState(false);
   const [error,     setError]     = useState(null);
 
+  // Android back gesture: push a history entry when entering non-tabs views,
+  // and intercept popstate to cancel/go back within the app instead of the browser.
+  useEffect(() => {
+    if (view !== "tabs") history.pushState({ appView: view }, "");
+  }, [view]);
+
+  useEffect(() => {
+    const handler = () => {
+      if (view === "log")    setView("tabs");
+      else if (view === "edit")   setView("detail");
+      else if (view === "detail") { setSelected(null); setView("tabs"); }
+    };
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, [view]);
+
   // Keep cache in sync whenever entries change
   const setAndCache = updated => {
     setEntries(updated);
@@ -1039,16 +1055,13 @@ function App() {
 
       // Header: title + date nav side by side (only on Daily tab)
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
-        React.createElement("div", null,
-          React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Match Journal"),
-          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, marginTop: 2 } },
-            React.createElement("p", { style: { margin: 0 } }, "Mental game tracker"),
-            syncing && React.createElement("span", {
-              style: { fontSize: 11, color: "var(--text3)", display: "flex", alignItems: "center", gap: 3 }
-            },
-              React.createElement("span", { className: "sync-dot" }),
-              "syncing"
-            )
+        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+          React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
+          syncing && React.createElement("span", {
+            style: { fontSize: 11, color: "var(--text3)", display: "flex", alignItems: "center", gap: 3 }
+          },
+            React.createElement("span", { className: "sync-dot" }),
+            "syncing"
           )
         ),
         tab === "Daily" && React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })

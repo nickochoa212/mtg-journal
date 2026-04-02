@@ -1,8 +1,8 @@
 {
-  "name": "MTG Match Journal",
+  "name": "MTG Journal",
   "short_name": "MTG Journal",
-  "description": "Mental game tracker for Magic: The Gathering local events",
-  "start_url": "/",
+  "description": "Match journal for Magic: The Gathering",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#3C3489",
