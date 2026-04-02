@@ -66,7 +66,7 @@ function offsetDate(str, days) {
 }
 
 function haptic() {
-  try { if (navigator.vibrate) navigator.vibrate(10); } catch {}
+  try { if (navigator.vibrate) navigator.vibrate(25); } catch {}
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
