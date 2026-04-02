@@ -1056,14 +1056,31 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onF
         rows: 3,
       })
     ),
-    React.createElement("div", { style: { display: "flex", gap: 10, justifyContent: "flex-end", alignItems: "center" } },
-      validationError && React.createElement("span", {
-        style: { flex: 1, fontSize: 13, color: "#dc2626" }
-      }, validationError),
-      React.createElement("button", { className: "btn-ghost", onClick: onCancel }, "Cancel"),
-      React.createElement("button", {
-        className: "btn-primary", onClick: handleSave,
-      }, isEdit ? "Save changes" : "Log entry")
+    // Spacer so content doesn't hide behind the fixed action bar
+    React.createElement("div", { style: { height: 72 } }),
+
+    ReactDOM.createPortal(
+      React.createElement("div", {
+        style: {
+          position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 200,
+          background: "var(--surface)", borderTop: "1px solid var(--border)",
+          padding: `12px 16px calc(12px + env(safe-area-inset-bottom, 0px))`,
+        }
+      },
+        React.createElement("div", {
+          style: { maxWidth: 560, margin: "0 auto", display: "flex", gap: 10, alignItems: "center" }
+        },
+          validationError && React.createElement("span", {
+            style: { flex: 1, fontSize: 13, color: "#dc2626" }
+          }, validationError),
+          React.createElement("button", { className: "btn-ghost", onClick: onCancel, style: { flex: validationError ? "none" : 1 } }, "Cancel"),
+          React.createElement("button", {
+            className: "btn-primary", onClick: handleSave,
+            style: { flex: 2 },
+          }, isEdit ? "Save changes" : "Log entry")
+        )
+      ),
+      document.body
     )
   );
 }
@@ -1281,7 +1298,7 @@ function App() {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.17"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.18"),
         ),
         tab === "Daily" && React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
