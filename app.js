@@ -548,7 +548,9 @@ function FormatList({ formats, onChange }) {
   return React.createElement("div", { style: { position: "relative" } },
 
     // Floating ghost row that follows the cursor
-    ghostFmt && React.createElement("div", {
+    // Rendered via portal so it escapes the tab slider's CSS transform (which would
+    // otherwise break position:fixed, causing the ghost to be clipped/invisible).
+    ghostFmt && ReactDOM.createPortal(React.createElement("div", {
       style: {
         position: "fixed",
         left: "50%",
@@ -573,7 +575,7 @@ function FormatList({ formats, onChange }) {
         background: ghostFmt.active ? "var(--accent-light)" : "var(--surface2)",
         color: ghostFmt.active ? "var(--accent-text)" : "var(--text3)",
       } }, ghostFmt.active ? "Active" : "Hidden")
-    ),
+    ), document.body),
 
     React.createElement("div", {
       ref: listRef,
