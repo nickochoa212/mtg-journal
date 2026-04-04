@@ -698,6 +698,31 @@ function HistoryTab({ entries, goals, formats, onOpen }) {
 
 const ROW_H = 52; // px per row including gap — used to compute ghost position and row shifts
 
+function ToggleSwitch({ checked, onChange }) {
+  return React.createElement("button", {
+    onClick: onChange,
+    style: {
+      position: "relative", display: "inline-flex", alignItems: "center",
+      width: 36, height: 22, borderRadius: 11, border: "none", cursor: "pointer",
+      flexShrink: 0, padding: 0,
+      background: checked ? "var(--accent)" : "var(--border)",
+      transition: "background 0.2s",
+    }
+  },
+    React.createElement("span", {
+      style: {
+        position: "absolute",
+        left: checked ? 16 : 2,
+        width: 18, height: 18, borderRadius: "50%",
+        background: "#fff",
+        transition: "left 0.2s",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
+        pointerEvents: "none",
+      }
+    })
+  );
+}
+
 function FormatList({ formats, onChange, onRename }) {
   const [dragging, setDragging] = useState(null); // index of the row being dragged
   const [dragY,    setDragY]    = useState(0);    // current cursor Y (viewport coords)
@@ -781,12 +806,7 @@ function FormatList({ formats, onChange, onRename }) {
       }
     },
       React.createElement("span", { style: { fontSize: 18, color: "var(--accent-text)", flexShrink: 0, lineHeight: 1 } }, "⠿"),
-      React.createElement("span", { style: { flex: 1, fontSize: 14, fontWeight: 600, color: "var(--text)" } }, ghostFmt.name),
-      React.createElement("span", { style: {
-        fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20,
-        background: ghostFmt.active ? "var(--accent-light)" : "var(--surface2)",
-        color:      ghostFmt.active ? "var(--accent-text)"  : "var(--text3)",
-      } }, ghostFmt.active ? "Active" : "Hidden")
+      React.createElement("span", { style: { flex: 1, fontSize: 14, fontWeight: 600, color: "var(--text)" } }, ghostFmt.name)
     ), document.body),
 
     React.createElement("div", {
@@ -846,15 +866,7 @@ function FormatList({ formats, onChange, onRename }) {
             },
           }),
 
-          React.createElement("button", {
-            onClick: () => toggleActive(i),
-            style: {
-              fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20,
-              background: f.active ? "var(--accent-light)" : "var(--surface2)",
-              color:      f.active ? "var(--accent-text)"  : "var(--text3)",
-              border: "none", cursor: "pointer", flexShrink: 0,
-            }
-          }, f.active ? "Active" : "Hidden"),
+          React.createElement(ToggleSwitch, { checked: f.active, onChange: () => toggleActive(i) }),
 
           React.createElement("button", {
             onClick: () => { if (window.confirm(`Delete "${f.name}"?`)) remove(i); },
@@ -975,17 +987,7 @@ function GoalList({ goals, onChange }) {
             },
           }),
           React.createElement("div", { style: { display: "flex", flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 0 } },
-            React.createElement("button", {
-              onClick: () => toggleActive(i),
-              style: {
-                fontSize: 13, fontWeight: 600, padding: "8px 14px", borderRadius: 20, whiteSpace: "nowrap",
-                minHeight: 40, minWidth: 72,
-                background: g.active ? "var(--accent-light)" : "var(--surface2)",
-                color:      g.active ? "var(--accent-text)"  : "var(--text3)",
-                border: g.active ? "1.5px solid var(--accent)" : "1.5px solid var(--border)",
-                cursor: "pointer",
-              }
-            }, g.active ? "Active" : "Hidden"),
+            React.createElement(ToggleSwitch, { checked: g.active, onChange: () => toggleActive(i) }),
             React.createElement("button", {
               onClick: () => remove(i),
               style: { background: "none", border: "none", cursor: "pointer", color: "#dc2626", fontSize: 20, lineHeight: 1, padding: "4px 6px", textAlign: "center" }
@@ -1531,7 +1533,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.10"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.11"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
