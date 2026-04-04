@@ -358,14 +358,30 @@ function EntryList({ entries, onOpen }) {
 }
 
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
+// The active-tab indicator is a separate absolutely-positioned bar that slides
+// imperatively (via indicatorRef) to follow swipe gestures in real time.
 
-function TabBar({ active, onChange }) {
-  return React.createElement("div", { className: "tab-bar" },
+function TabBar({ active, onChange, indicatorRef }) {
+  const tabIdx = TABS.indexOf(active);
+  return React.createElement("div", { className: "tab-bar", style: { position: "relative" } },
     TABS.map(t => React.createElement("button", {
       key: t,
       className: `tab-btn ${active === t ? "active" : ""}`,
       onClick: () => onChange(t),
-    }, t))
+    }, t)),
+    React.createElement("div", {
+      ref: indicatorRef,
+      style: {
+        position: "absolute", bottom: 0, left: 0,
+        width: `${100 / TABS.length}%`, height: 2,
+        background: "var(--accent)",
+        transform: `translateX(${tabIdx * 100}%)`,
+        transition: "transform 0.3s cubic-bezier(0.32,0.72,0,1), background 0.25s",
+        willChange: "transform",
+        borderRadius: "1px 1px 0 0",
+        pointerEvents: "none",
+      }
+    })
   );
 }
 
@@ -375,19 +391,30 @@ function TabBar({ active, onChange }) {
 // Touch-move drags the panels live; touchend snaps to the nearest tab.
 // The outer div has overflow:hidden to clip the off-screen panels.
 
-function TabSlider({ tab, setTab, setDailyDate, children }) {
+function TabSlider({ tab, setTab, setDailyDate, indicatorRef, children }) {
   const tabIdx      = TABS.indexOf(tab);
   const sliderRef   = useRef(null);
   const touchRef    = useRef(null);   // { x, y, time, swiping }
   const tabIdxRef   = useRef(tabIdx);
   useEffect(() => { tabIdxRef.current = tabIdx; }, [tabIdx]);
 
-  // Snap to current tab (animated)
+  const EASE = "transform 0.3s cubic-bezier(0.32,0.72,0,1)";
+
+  const setIndicator = (pos, animate) => {
+    const ind = indicatorRef?.current;
+    if (!ind) return;
+    const clamped = Math.max(0, Math.min(TABS.length - 1, pos));
+    ind.style.transition = animate ? EASE : "none";
+    ind.style.transform  = `translateX(${clamped * 100}%)`;
+  };
+
+  // Snap to current tab (animated) — also snaps the indicator
   useEffect(() => {
     const el = sliderRef.current;
     if (!el) return;
-    el.style.transition = "transform 0.3s cubic-bezier(0.32,0.72,0,1)";
+    el.style.transition = EASE;
     el.style.transform  = `translateX(-${tabIdx * 100}%)`;
+    setIndicator(tabIdx, true);
   }, [tabIdx]);
 
   const onTouchStart = e => {
@@ -408,9 +435,11 @@ function TabSlider({ tab, setTab, setDailyDate, children }) {
     if (!t.swiping) return;
     const el = sliderRef.current;
     if (!el) return;
-    const offset = -(tabIdxRef.current * 100) + (dx / el.offsetWidth * 100);
+    const fraction = dx / el.offsetWidth;
+    const offset   = -(tabIdxRef.current * 100) + (fraction * 100);
     el.style.transition = "none";
     el.style.transform  = `translateX(${offset}%)`;
+    setIndicator(tabIdxRef.current - fraction, false);
   };
 
   const onTouchEnd = e => {
@@ -425,9 +454,10 @@ function TabSlider({ tab, setTab, setDailyDate, children }) {
     if (isFlick) nextIdx = dx < 0 ? Math.min(TABS.length - 1, nextIdx + 1) : Math.max(0, nextIdx - 1);
     const el = sliderRef.current;
     if (el) {
-      el.style.transition = "transform 0.3s cubic-bezier(0.32,0.72,0,1)";
+      el.style.transition = EASE;
       el.style.transform  = `translateX(-${nextIdx * 100}%)`;
     }
+    setIndicator(nextIdx, true);
     const nextTab = TABS[nextIdx];
     if (nextTab !== tab) {
       if (nextTab === "Daily") setDailyDate(todayStr());
@@ -494,7 +524,7 @@ function DateNav({ date, onChange }) {
 // which remounts LogForm with fresh state. Changing the date also resets the
 // form so the default date stays in sync with the day navigator.
 
-function DailyTab({ entries, goals, date, onOpen, onSave, settings, onFormatChange }) {
+function DailyTab({ entries, goals, date, onOpen, onSave, settings, onFormatChange, isActive }) {
   const [formKey, setFormKey] = useState(0);
   const dayEntries = entries.filter(e => e.date === date).sort((a, b) => b.id - a.id);
 
@@ -511,6 +541,7 @@ function DailyTab({ entries, goals, date, onOpen, onSave, settings, onFormatChan
       defaultDate: date,
       onSave: handleSave,
       onFormatChange,
+      isActive,
     }),
     dayEntries.length > 0 && React.createElement("div", {
       style: { borderTop: "1px solid var(--border)", paddingTop: 16 }
@@ -971,7 +1002,7 @@ function SettingsTab({ settings, onSave, onFormatRename, lastSynced, uid, user }
  * For legacy entries being edited (no stored wins/losses), sensible defaults
  * are inferred from the stored result string.
  */
-function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onFormatChange }) {
+function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onFormatChange, isActive = true }) {
   const activeFormats = settings.formats.filter(f => f.active).map(f => f.name);
   const goals = settings.goals;
 
@@ -1024,6 +1055,7 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onF
 
   const handleSave = () => {
     if (!form.date) { setValidationError("Please select a date."); return; }
+    if (form.wins === 0 && form.losses === 0) { setValidationError("Select a result — wins and losses can't both be 0."); return; }
     onSave({ ...form, result });
   };
 
@@ -1136,7 +1168,7 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onF
     // Spacer so content doesn't hide behind the fixed action bar
     React.createElement("div", { style: { height: 72 } }),
 
-    ReactDOM.createPortal(
+    isActive && ReactDOM.createPortal(
       React.createElement("div", {
         style: {
           position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 200,
@@ -1224,6 +1256,7 @@ function App({ uid, user }) {
   const [syncing,     setSyncing]     = useState(false);
   const [error,       setError]       = useState(null);
   const [lastSynced,  setLastSynced]  = useState(null);   // Unix timestamp of last successful sync
+  const indicatorRef = useRef(null);
 
   // Android back gesture: push a history entry when entering a detail/form view
   // so the device back button navigates within the app instead of leaving it.
@@ -1375,19 +1408,20 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.2"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.3"),
         ),
         tab === "Daily" && React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
 
-      React.createElement(TabBar, { active: tab, onChange: changeTab }),
+      React.createElement(TabBar, { active: tab, onChange: changeTab, indicatorRef }),
 
       loading
         ? React.createElement(Spinner)
-        : React.createElement(TabSlider, { tab, setTab: changeTab, setDailyDate },
+        : React.createElement(TabSlider, { tab, setTab: changeTab, setDailyDate, indicatorRef },
             React.createElement("div", { style: { minWidth: "100%", width: "100%", padding: "0 8px" } },
               React.createElement(DailyTab, {
                 entries, goals, date: dailyDate, settings,
+                isActive: tab === "Daily",
                 onOpen: entry => { setSelected(entry); setView("detail"); },
                 onSave: saveNew,
                 onFormatChange: handleFormatChange,
