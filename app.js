@@ -1,7 +1,19 @@
-// ─── Config ───────────────────────────────────────────────────────────────────
-// Replace this URL with your own deployed Google Apps Script web app URL.
-// To find or create it: Extensions → Apps Script → Deploy → Manage deployments.
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycby3Dj3LEz3AcIfAfUGhOurzZZlMrXQyrF03AfDZ0rABMtPq23tzL8g4PiuGpteBW9zAqQ/exec";
+// ─── Firebase ─────────────────────────────────────────────────────────────────
+
+firebase.initializeApp({
+  apiKey:            "AIzaSyAuTtqQLcIoyWf2R5ueAd2nY2lFcYEBNWo",
+  authDomain:        "food-journal-2f76e.firebaseapp.com",
+  projectId:         "food-journal-2f76e",
+  storageBucket:     "food-journal-2f76e.firebasestorage.app",
+  messagingSenderId: "1005934675076",
+  appId:             "1:1005934675076:web:a0b83b77742c368940eed1",
+});
+
+const auth = firebase.auth();
+const db   = firebase.firestore();
+
+// ─── Google Sheets URL — only used by the one-time migration import ───────────
+const SHEETS_URL = "https://script.google.com/macros/s/AKfycby3Dj3LEz3AcIfAfUGhOurzZZlMrXQyrF03AfDZ0rABMtPq23tzL8g4PiuGpteBW9zAqQ/exec";
 
 const { useState, useEffect, useRef } = React;
 
@@ -174,37 +186,64 @@ function cacheSave(entries) {
   try { localStorage.setItem(CACHE_KEY, JSON.stringify(entries)); } catch {}
 }
 
-// ─── API ──────────────────────────────────────────────────────────────────────
+// ─── Firestore API ────────────────────────────────────────────────────────────
 
-/**
- * Fetches all entries and settings from the Google Apps Script.
- * Handles both the legacy response shape (bare array) and the current shape
- * ({ entries, settings }) for backwards compatibility with old deployments.
- */
-async function apiGet() {
-  const res = await fetch(SCRIPT_URL);
-  if (!res.ok) throw new Error("Failed");
-  const data = await res.json();
-  if (Array.isArray(data)) return { entries: data, settings: null };
-  return data;
+const entriesCol  = uid => db.collection(`users/${uid}/entries`);
+const settingsDoc = uid => db.doc(`users/${uid}/settings`);
+
+/** Loads all entries and settings from Firestore for the signed-in user. */
+async function firestoreGet(uid) {
+  const [snap, sDoc] = await Promise.all([
+    entriesCol(uid).get(),
+    settingsDoc(uid).get(),
+  ]);
+  return {
+    entries:  snap.docs.map(d => d.data()),
+    settings: sDoc.exists ? sDoc.data() : null,
+  };
+}
+
+/** Creates or overwrites a single entry document. */
+async function firestoreUpsert(uid, entry) {
+  await entriesCol(uid).doc(String(entry.id)).set(entry);
+}
+
+/** Deletes an entry document by id. */
+async function firestoreRemove(uid, id) {
+  await entriesCol(uid).doc(String(id)).delete();
+}
+
+/** Saves the settings document for the signed-in user. */
+async function firestoreSaveSettings(uid, s) {
+  await settingsDoc(uid).set(s);
 }
 
 /**
- * Posts an action payload to the Google Apps Script.
- *
- * Uses Content-Type: text/plain instead of application/json intentionally —
- * Google Apps Script rejects cross-origin requests with application/json
- * during the CORS preflight. text/plain bypasses the preflight, and the
- * body is then parsed manually as JSON inside doPost.
+ * One-time migration: fetches all entries + settings from the Google Sheet
+ * and batch-writes them to Firestore. Resolves with the count of entries imported.
  */
-async function apiPost(body) {
-  const res = await fetch(SCRIPT_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error("Failed");
-  return res.json();
+async function migrateFromSheets(uid) {
+  const res = await fetch(SHEETS_URL);
+  if (!res.ok) throw new Error("Could not reach Google Sheet");
+  const data = await res.json();
+  const rawEntries    = Array.isArray(data) ? data : (data.entries || []);
+  const sheetSettings = Array.isArray(data) ? null : data.settings;
+
+  // Firestore batch writes are capped at 500 operations each
+  const col = entriesCol(uid);
+  let batch = db.batch();
+  let count = 0;
+  const commits = [];
+  for (const entry of rawEntries) {
+    batch.set(col.doc(String(entry.id)), entry);
+    count++;
+    if (count % 500 === 0) { commits.push(batch.commit()); batch = db.batch(); }
+  }
+  commits.push(batch.commit());
+  await Promise.all(commits);
+
+  if (sheetSettings) await firestoreSaveSettings(uid, sheetSettings);
+  return rawEntries.length;
 }
 
 // ─── Small shared components ──────────────────────────────────────────────────
@@ -232,6 +271,42 @@ function Badge({ label }) {
 function Spinner() {
   return React.createElement("div", { style: { display: "flex", justifyContent: "center", padding: "3rem 0" } },
     React.createElement("div", { className: "spinner" })
+  );
+}
+
+// ─── Login screen ─────────────────────────────────────────────────────────────
+
+function LoginScreen() {
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState(null);
+
+  const signIn = () => {
+    setLoading(true);
+    setError(null);
+    auth.signInWithPopup(new firebase.auth.GoogleAuthProvider())
+      .catch(() => {
+        setError("Sign-in failed. Please try again.");
+        setLoading(false);
+      });
+  };
+
+  return React.createElement("div", {
+    style: {
+      display: "flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center", minHeight: "100vh", padding: 32, gap: 16,
+    }
+  },
+    React.createElement("h1", { style: { fontSize: 26, fontWeight: 700, color: "var(--text)", margin: 0 } }, "MTG Journal"),
+    React.createElement("p", { style: { fontSize: 14, color: "var(--text2)", textAlign: "center", margin: 0 } },
+      "Sign in to access your match history."
+    ),
+    React.createElement("button", {
+      className: "btn-primary",
+      onClick: signIn,
+      disabled: loading,
+      style: { fontSize: 15, padding: "12px 28px", marginTop: 8 },
+    }, loading ? "Signing in…" : "Sign in with Google"),
+    error && React.createElement("p", { style: { color: "#dc2626", fontSize: 13, margin: 0 } }, error)
   );
 }
 
@@ -741,26 +816,25 @@ function FormatList({ formats, onChange, onRename }) {
 
 // ─── Settings tab ─────────────────────────────────────────────────────────────
 
-function SettingsTab({ settings, onSave, onFormatRename, lastSynced, onSyncSuccess }) {
-  const [formats,    setFormats]    = useState(settings.formats);
-  const [goals,      setGoals]      = useState(settings.goals);
-  const [accent,     setAccent]     = useState(settings.accent);
-  const [darkMode,   setDarkMode]   = useState(settings.darkMode);
-  const [newFmt,     setNewFmt]     = useState("");
-  const [syncStatus, setSyncStatus] = useState(null); // null | "syncing" | "ok" | "error"
+function SettingsTab({ settings, onSave, onFormatRename, lastSynced, uid, user }) {
+  const [formats,       setFormats]       = useState(settings.formats);
+  const [goals,         setGoals]         = useState(settings.goals);
+  const [accent,        setAccent]        = useState(settings.accent);
+  const [darkMode,      setDarkMode]      = useState(settings.darkMode);
+  const [newFmt,        setNewFmt]        = useState("");
+  const [migrateStatus, setMigrateStatus] = useState(null); // null | "migrating" | {ok:n} | {error:msg}
   const mounted = useRef(false);
 
   useEffect(() => { applyTheme(accent, darkMode); }, [accent, darkMode]);
 
-  // Auto-save to localStorage and propagate to App whenever any setting changes.
+  // Auto-save to localStorage and Firestore whenever any setting changes.
   // Skips the initial mount so we don't overwrite settings that just loaded.
-  // Also background-syncs to the sheet; failures are silent (Sync Now can retry).
   useEffect(() => {
     if (!mounted.current) { mounted.current = true; return; }
     const s = { ...settings, formats, goals, accent, darkMode };
     saveSettings(s);
     onSave(s);
-    apiPost({ action: "saveSettings", settings: s }).catch(() => {});
+    firestoreSaveSettings(uid, s).catch(() => {});
   }, [formats, goals, accent, darkMode]);
 
   const addFormat = () => {
@@ -773,23 +847,13 @@ function SettingsTab({ settings, onSave, onFormatRename, lastSynced, onSyncSucce
 
   const setGoal = (i, v) => setGoals(goals.map((g, j) => j === i ? v : g));
 
-  /** Manually triggers a sheet sync for settings with visible status feedback. */
-  const syncNow = () => {
-    const s = { ...settings, formats, goals, accent, darkMode };
-    setSyncStatus("syncing");
-    apiPost({ action: "saveSettings", settings: s })
-      .then(() => {
-        setSyncStatus("ok");
-        if (onSyncSuccess) onSyncSuccess();
-        setTimeout(() => setSyncStatus(null), 2500);
-      })
-      .catch(() => { setSyncStatus("error"); setTimeout(() => setSyncStatus(null), 2500); });
+  /** Pulls all entries + settings from the Google Sheet and writes them to Firestore. */
+  const migrateNow = () => {
+    setMigrateStatus("migrating");
+    migrateFromSheets(uid)
+      .then(count => setMigrateStatus({ ok: count }))
+      .catch(err   => setMigrateStatus({ error: err.message }));
   };
-
-  const syncLabel = syncStatus === "syncing" ? "Syncing…"
-    : syncStatus === "ok"    ? "Synced ✓"
-    : syncStatus === "error" ? "Sync failed"
-    : "Sync now";
 
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 28 } },
 
@@ -865,17 +929,37 @@ function SettingsTab({ settings, onSave, onFormatRename, lastSynced, onSyncSucce
     ),
 
     React.createElement("div", null,
-      React.createElement(SectionLabel, null, "Data"),
+      React.createElement(SectionLabel, null, "Account"),
+      React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+        React.createElement("span", { style: { fontSize: 13, color: "var(--text2)" } }, user?.email || ""),
+        React.createElement("button", {
+          className: "btn-ghost",
+          onClick: () => auth.signOut(),
+          style: { fontSize: 13 },
+        }, "Sign out")
+      ),
+      lastSynced && React.createElement("div", { style: { marginTop: 6, fontSize: 12, color: "var(--text3)" } },
+        `Last loaded from cloud: ${fmtTimeAgo(lastSynced)}`
+      )
+    ),
+
+    React.createElement("div", null,
+      React.createElement(SectionLabel, null, "Import from Google Sheets"),
+      React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginBottom: 10 } },
+        "One-time migration. Imports all entries and settings from your Google Sheet into Firestore. Entries with the same ID will be overwritten."
+      ),
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
         React.createElement("button", {
           className: "btn-primary",
-          onClick: syncNow,
-          disabled: syncStatus === "syncing",
-        }, syncLabel),
-        syncStatus === "error" && React.createElement("span", { style: { fontSize: 12, color: "#dc2626" } }, "Check your script URL")
-      ),
-      lastSynced && React.createElement("div", { style: { marginTop: 6, fontSize: 12, color: "var(--text3)" } },
-        `Last synced: ${fmtTimeAgo(lastSynced)}`
+          onClick: migrateNow,
+          disabled: migrateStatus === "migrating",
+        }, migrateStatus === "migrating" ? "Importing…" : "Import"),
+        migrateStatus?.ok != null && React.createElement("span", { style: { fontSize: 12, color: "#059669" } },
+          `Imported ${migrateStatus.ok} ${migrateStatus.ok === 1 ? "entry" : "entries"}`
+        ),
+        migrateStatus?.error && React.createElement("span", { style: { fontSize: 12, color: "#dc2626" } },
+          migrateStatus.error
+        ),
       )
     ),
 
@@ -1136,7 +1220,7 @@ function DetailView({ entry, goals, onEdit, onDelete, onBack }) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
-function App() {
+function App({ uid, user }) {
   const [settings,    setSettings]    = useState(loadSettings);
   const [entries,     setEntries]     = useState(() => cacheLoad().sort((a, b) => b.id - a.id));
   const [tab,         setTab]         = useState("Daily");
@@ -1174,14 +1258,14 @@ function App() {
     const hasCached = cacheLoad().length > 0;
     if (hasCached) setLoading(false);
     setSyncing(true);
-    apiGet()
-      .then(({ entries: data, settings: sheetSettings }) => {
+    firestoreGet(uid)
+      .then(({ entries: data, settings: cloudSettings }) => {
         const sorted = data
           .map(e => ({ ...e, date: String(e.date).slice(0, 10) }))
           .sort((a, b) => b.id - a.id);
         setAndCache(sorted);
-        if (sheetSettings) {
-          const merged = { ...loadSettings(), ...sheetSettings };
+        if (cloudSettings) {
+          const merged = { ...loadSettings(), ...cloudSettings };
           saveSettings(merged);
           setSettings(merged);
           applyTheme(merged.accent, merged.darkMode);
@@ -1189,7 +1273,7 @@ function App() {
         setLastSynced(Date.now());
       })
       .catch(() => {
-        if (!hasCached) setError("Couldn't load entries. Check your script URL.");
+        if (!hasCached) setError("Couldn't load entries from Firestore.");
       })
       .finally(() => { setLoading(false); setSyncing(false); });
   }, []);
@@ -1219,7 +1303,7 @@ function App() {
     setAndCache(updated);
     // Background sync each affected entry
     affected.forEach(e => {
-      apiPost({ action: "update", entry: { ...e, format: newName } }).catch(() => {});
+      firestoreUpsert(uid, { ...e, format: newName }).catch(() => {});
     });
   };
 
@@ -1233,8 +1317,8 @@ function App() {
     const entry = { ...form, id: Date.now() };
     setAndCache([entry, ...entries]);
     setView("tabs");
-    apiPost({ action: "create", entry }).catch(() => {
-      setError("Saved locally but sheet sync failed. It will retry on next load.");
+    firestoreUpsert(uid, entry).catch(() => {
+      setError("Saved locally but Firestore sync failed.");
     });
   };
 
@@ -1244,8 +1328,8 @@ function App() {
     setAndCache(entries.map(e => e.id === selected.id ? updated : e));
     setSelected(updated);
     setView("detail");
-    apiPost({ action: "update", entry: updated }).catch(() => {
-      setError("Saved locally but sheet sync failed.");
+    firestoreUpsert(uid, updated).catch(() => {
+      setError("Saved locally but Firestore sync failed.");
     });
   };
 
@@ -1255,8 +1339,8 @@ function App() {
     setAndCache(entries.filter(e => e.id !== id));
     setSelected(null);
     setView("tabs");
-    apiPost({ action: "delete", id }).catch(() => {
-      setError("Deleted locally but sheet sync failed.");
+    firestoreRemove(uid, id).catch(() => {
+      setError("Deleted locally but Firestore sync failed.");
     });
   };
 
@@ -1298,7 +1382,7 @@ function App() {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.18"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.19"),
         ),
         tab === "Daily" && React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
@@ -1328,7 +1412,8 @@ function App() {
                 onSave: s => setSettings(s),
                 onFormatRename: handleFormatRename,
                 lastSynced,
-                onSyncSuccess: () => setLastSynced(Date.now()),
+                uid,
+                user,
               })
             )
           )
@@ -1369,4 +1454,26 @@ function App() {
   );
 }
 
-ReactDOM.render(React.createElement(App), document.getElementById("root"));
+// ─── Root — auth gate ─────────────────────────────────────────────────────────
+// Resolves auth state before rendering anything. Shows a spinner while Firebase
+// checks the session, LoginScreen if not signed in, App if signed in.
+
+function Root() {
+  const [user, setUser] = useState(undefined); // undefined=loading, null=signed out, object=signed in
+
+  useEffect(() => {
+    return auth.onAuthStateChanged(u => setUser(u));
+  }, []);
+
+  if (user === undefined) {
+    return React.createElement("div", {
+      style: { display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }
+    }, React.createElement("div", { className: "spinner" }));
+  }
+
+  if (!user) return React.createElement(LoginScreen);
+
+  return React.createElement(App, { uid: user.uid, user });
+}
+
+ReactDOM.render(React.createElement(Root), document.getElementById("root"));
