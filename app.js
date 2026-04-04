@@ -693,7 +693,7 @@ function TabSlider({ tab, setTab, setDailyDate, indicatorRef, children }) {
 // PTR: drag down at top ≥ 64px → calls onRefresh() (soft data re-fetch, no reload).
 // Bounce: at bottom, try to scroll further → brief spring animation on content.
 
-function ScrollPanel({ children, style, onRefresh }) {
+function ScrollPanel({ children, style, onRefresh, scrollRef }) {
   const elRef    = useRef(null);
   const innerRef = useRef(null);
   const ptrRef   = useRef(null);
@@ -703,6 +703,7 @@ function ScrollPanel({ children, style, onRefresh }) {
     const inner = innerRef.current;
     const ptr   = ptrRef.current;
     if (!el || !inner || !ptr) return;
+    if (scrollRef) scrollRef.current = el;
 
     const PTR_THRESHOLD = 64;
     const SPRING = 'transform 0.38s cubic-bezier(0.34,1.56,0.64,1)';
@@ -1096,6 +1097,18 @@ function HistoryTab({ entries, goals, formats, onOpen }) {
       )
     ),
 
+    hasFilters && React.createElement("button", {
+      onClick: clearFilters,
+      style: {
+        width: "100%", padding: "8px", fontSize: 13, color: "var(--text2)",
+        background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)",
+        cursor: "pointer",
+      }
+    }, "Clear filters"),
+
+    React.createElement(StatsBar, { entries: filtered, goalCount: goals.length }),
+    React.createElement(ChartsSection, { entries: filtered, goals }),
+
     // Sort
     React.createElement("div", null,
       React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 } }, "Sort"),
@@ -1111,18 +1124,6 @@ function HistoryTab({ entries, goals, formats, onOpen }) {
         GROUP_OPTIONS.map(o => pill(o.label, groupKey === o.key, () => setGroupKey(o.key)))
       )
     ),
-
-    hasFilters && React.createElement("button", {
-      onClick: clearFilters,
-      style: {
-        width: "100%", padding: "8px", fontSize: 13, color: "var(--text2)",
-        background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)",
-        cursor: "pointer",
-      }
-    }, "Clear filters"),
-
-    React.createElement(StatsBar, { entries: filtered, goalCount: goals.length }),
-    React.createElement(ChartsSection, { entries: filtered, goals }),
 
     // Entry list — flat or grouped
     groupKey === "none"
@@ -1855,6 +1856,8 @@ function App({ uid, user }) {
   const [selected,    setSelected]    = useState(null);   // the entry open in detail/edit view
   const [loading,     setLoading]     = useState(true);   // true only on first load when cache is empty
   const [syncing,     setSyncing]     = useState(false);
+  const historyScrollRef = useRef(null);   // ref to the History ScrollPanel's scroll element
+  const historyScrollPos = useRef(0);      // scroll position saved before entering edit view
   const [error,       setError]       = useState(null);
   const [lastSynced,  setLastSynced]  = useState(null);   // Unix timestamp of last successful sync
   const [testMode,    setTestMode]    = useState(() => localStorage.getItem(TEST_MODE_KEY) === "true");
@@ -1869,7 +1872,7 @@ function App({ uid, user }) {
   useEffect(() => {
     const handler = () => {
       if      (view === "log")    setView("tabs");
-      else if (view === "edit")   { setSelected(null); setView("tabs"); }
+      else if (view === "edit")   { setSelected(null); setView("tabs"); requestAnimationFrame(() => { if (historyScrollRef.current) historyScrollRef.current.scrollTop = historyScrollPos.current; }); }
       else if (view === "detail") { setSelected(null); setView("tabs"); }
     };
     window.addEventListener("popstate", handler);
@@ -1994,12 +1997,17 @@ function App({ uid, user }) {
     });
   };
 
+  const restoreHistoryScroll = () => requestAnimationFrame(() => {
+    if (historyScrollRef.current) historyScrollRef.current.scrollTop = historyScrollPos.current;
+  });
+
   const saveEdit = async form => {
     setError(null);
     const updated = { ...form, id: selected.id };
     setAndCache(entries.map(e => e.id === selected.id ? updated : e));
     setSelected(null);
     setView("tabs");
+    restoreHistoryScroll();
     if (!testMode) firestoreUpsert(uid, updated).catch(() => {
       setError("Saved locally but Firestore sync failed.");
     });
@@ -2011,6 +2019,7 @@ function App({ uid, user }) {
     setAndCache(entries.filter(e => e.id !== id));
     setSelected(null);
     setView("tabs");
+    restoreHistoryScroll();
     if (!testMode) firestoreRemove(uid, id).catch(() => {
       setError("Deleted locally but Firestore sync failed.");
     });
@@ -2062,7 +2071,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.24"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.25"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
@@ -2081,10 +2090,10 @@ function App({ uid, user }) {
                 onFormatChange: handleFormatChange,
               })
             ),
-            React.createElement(ScrollPanel, { style: { minWidth: "100%", width: "100%", height: "100%", padding: "0 8px calc(env(safe-area-inset-bottom, 0px) + 48px)" }, onRefresh: handleRefresh },
+            React.createElement(ScrollPanel, { style: { minWidth: "100%", width: "100%", height: "100%", padding: "0 8px calc(env(safe-area-inset-bottom, 0px) + 48px)" }, onRefresh: handleRefresh, scrollRef: historyScrollRef },
               React.createElement(HistoryTab, {
                 entries, goals, formats,
-                onOpen: entry => { setSelected(entry); setView("edit"); },
+                onOpen: entry => { historyScrollPos.current = historyScrollRef.current?.scrollTop || 0; setSelected(entry); setView("edit"); },
               })
             ),
             React.createElement(ScrollPanel, { style: { minWidth: "100%", width: "100%", height: "100%", padding: "0 8px calc(env(safe-area-inset-bottom, 0px) + 48px)" }, onRefresh: handleRefresh },
@@ -2113,6 +2122,23 @@ function App({ uid, user }) {
       })
     ),
 
+    // ── Scroll-to-top FAB (History tab only) ──
+    tab === "History" && view === "tabs" && ReactDOM.createPortal(
+      React.createElement("button", {
+        onClick: () => { if (historyScrollRef.current) historyScrollRef.current.scrollTo({ top: 0, behavior: "smooth" }); },
+        style: {
+          position: "fixed", bottom: `calc(env(safe-area-inset-bottom, 0px) + 16px)`, right: 16,
+          width: 44, height: 44, borderRadius: "50%",
+          background: "var(--accent)", color: "#fff",
+          border: "none", cursor: "pointer", fontSize: 20, lineHeight: 1,
+          boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          zIndex: 200,
+        }
+      }, "↑"),
+      document.body
+    ),
+
     // ── Edit entry ──
     view === "edit" && selected && React.createElement("div", { style: { flex: 1, overflowY: "auto", minHeight: 0, padding: "0 8px env(safe-area-inset-bottom, 16px)" } },
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
@@ -2125,7 +2151,7 @@ function App({ uid, user }) {
       ),
       React.createElement(LogForm, {
         initial: selected, settings, isEdit: true, isActive: true,
-        onSave: saveEdit, onCancel: () => { setSelected(null); setView("tabs"); },
+        onSave: saveEdit, onCancel: () => { setSelected(null); setView("tabs"); restoreHistoryScroll(); },
         onFormatChange: handleFormatChange,
       }),
       React.createElement("div", { style: { height: 72 } })
