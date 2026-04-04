@@ -986,11 +986,11 @@ function GoalList({ goals, onChange }) {
               color: g.active ? "var(--text)" : "var(--text3)",
             },
           }),
-          React.createElement("div", { style: { display: "flex", flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 0 } },
+          React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6, flexShrink: 0 } },
             React.createElement(ToggleSwitch, { checked: g.active, onChange: () => toggleActive(i) }),
             React.createElement("button", {
               onClick: () => remove(i),
-              style: { background: "none", border: "none", cursor: "pointer", color: "#dc2626", fontSize: 20, lineHeight: 1, padding: "4px 6px", textAlign: "center" }
+              style: { background: "none", border: "none", cursor: "pointer", color: "#dc2626", fontSize: 20, lineHeight: 1, padding: "2px 4px", textAlign: "center" }
             }, "×")
           )
         );
@@ -1533,7 +1533,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.11"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.12"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
