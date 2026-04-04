@@ -540,7 +540,6 @@ function DailyTab({ entries, goals, date, onOpen, onSave, settings, onFormatChan
   };
 
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
-    React.createElement(StatsBar, { entries: dayEntries, goalCount: goals.length }),
     React.createElement(LogForm, {
       key: `${formKey}-${date}`,
       settings,
@@ -1532,7 +1531,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.8"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.9"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
