@@ -989,6 +989,7 @@ function HistoryTab({ entries, goals, formats, onOpen }) {
   const [datePreset,      setDatePreset]      = useState("All time");
   const [dateFrom,        setDateFrom]        = useState("");
   const [dateTo,          setDateTo]          = useState("");
+  const [notesSearch,     setNotesSearch]     = useState("");
   const [sortKey,         setSortKey]         = useState("date-desc");
   const [groupKey,        setGroupKey]        = useState("none");
 
@@ -1014,22 +1015,25 @@ function HistoryTab({ entries, goals, formats, onOpen }) {
   const from = effectiveDateFrom();
   const to   = effectiveDateTo();
 
+  const notesQuery = notesSearch.trim().toLowerCase();
   const filtered = entries.filter(e => {
     if (selectedFormats.length && !selectedFormats.includes(e.format)) return false;
     if (results.length         && !results.includes(e.result))         return false;
     if (from && e.date < from) return false;
     if (to   && e.date > to)   return false;
+    if (notesQuery && !(e.notes || "").toLowerCase().includes(notesQuery)) return false;
     return true;
   });
 
   const sorted = sortEntries(filtered, sortKey);
   const groups = groupEntries(sorted, groupKey);
 
-  const hasFilters = selectedFormats.length || results.length || datePreset !== "All time";
+  const hasFilters = selectedFormats.length || results.length || datePreset !== "All time" || notesQuery;
 
   const clearFilters = () => {
     setSelectedFormats([]); setResults([]);
     setDatePreset("All time"); setDateFrom(""); setDateTo("");
+    setNotesSearch("");
   };
 
   const pill = (label, active, onClick, colorStyle) => React.createElement("button", {
@@ -1094,6 +1098,26 @@ function HistoryTab({ entries, goals, formats, onOpen }) {
             style: { position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: "var(--text3)", pointerEvents: "none" }
           }, "End")
         )
+      )
+    ),
+
+    // Notes search
+    React.createElement("div", null,
+      React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 } }, "Search notes"),
+      React.createElement("div", { style: { position: "relative" } },
+        React.createElement("input", {
+          type: "text", value: notesSearch, placeholder: "Search notes…",
+          onChange: e => setNotesSearch(e.target.value),
+          style: { width: "100%", paddingRight: notesSearch ? 32 : undefined },
+        }),
+        notesSearch && React.createElement("button", {
+          onClick: () => setNotesSearch(""),
+          style: {
+            position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+            background: "none", border: "none", cursor: "pointer",
+            fontSize: 16, color: "var(--text3)", padding: "0 2px", lineHeight: 1,
+          }
+        }, "×")
       )
     ),
 
@@ -2071,7 +2095,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.25"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.26"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
