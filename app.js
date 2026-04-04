@@ -138,6 +138,13 @@ function fmtTimeAgo(ts) {
   return fmtDateLong(new Date(ts).toISOString().slice(0, 10));
 }
 
+/**
+ * Normalises the `goals` field of an entry to a plain {id: boolean} object.
+ * Legacy entries stored goals as an array; this always returns an object so
+ * callers can use Object.values/keys uniformly.
+ */
+const normalizeGoals = goals => (goals && !Array.isArray(goals)) ? goals : {};
+
 // ─── Test dataset ─────────────────────────────────────────────────────────────
 
 const TEST_MODE_KEY = "mtg-journal-test-mode";
@@ -426,10 +433,10 @@ function ChartCard({ title, subtitle, children }) {
 
 /**
  * Three charts shown in HistoryTab below the stats grid.
- *   1. Rolling 10-match win rate (line sparkline)
- *   2. Rolling 10-match avg goals per match (line sparkline)
- *   4. Per-goal achievement % (horizontal bar heatmap)
- * Charts 1 & 2 are hidden when fewer than 10 entries are in the filtered set.
+ *   1. Rolling 10-match goals per match (line sparkline)
+ *   2. Rolling 10-match win rate (line sparkline)
+ *   3. Per-goal achievement % (horizontal bar chart)
+ * Charts 1 & 2 show a placeholder when fewer than 10 entries are in the filtered set.
  */
 function ChartsSection({ entries, goals }) {
   if (!entries.length) return null;
@@ -452,8 +459,7 @@ function ChartsSection({ entries, goals }) {
   let rollingGoals = null;
   if (sorted.length >= WINDOW && activeGoals.length) {
     const vals = sorted.map(e => {
-      const g = e.goals && !Array.isArray(e.goals) ? e.goals : {};
-      return Object.values(g).filter(Boolean).length / activeGoals.length;
+      return Object.values(normalizeGoals(e.goals)).filter(Boolean).length / activeGoals.length;
     });
     rollingGoals = [];
     for (let i = WINDOW - 1; i < sorted.length; i++) {
@@ -462,12 +468,9 @@ function ChartsSection({ entries, goals }) {
     }
   }
 
-  // Chart 4 — goal achievement heatmap
+  // Chart 3 — goal achievement heatmap
   const heatmap = activeGoals.map(goal => {
-    const relevant = entries.filter(e => {
-      const g = e.goals && !Array.isArray(e.goals) ? e.goals : {};
-      return goal.id in g;
-    });
+    const relevant = entries.filter(e => goal.id in normalizeGoals(e.goals));
     const pct = relevant.length ? relevant.filter(e => e.goals[goal.id]).length / relevant.length : 0;
     return { goal, pct };
   }); // order follows settings, no sort
@@ -524,7 +527,7 @@ function LogMatchButton({ onClick }) {
 // ─── Entry card ───────────────────────────────────────────────────────────────
 
 function EntryCard({ entry, onOpen }) {
-  const entryGoals = entry.goals && !Array.isArray(entry.goals) ? entry.goals : {};
+  const entryGoals = normalizeGoals(entry.goals);
   const score = Object.values(entryGoals).filter(Boolean).length;
   const total = Object.keys(entryGoals).length;
   // Show "Win - 2/1" for entries with wins/losses data; plain badge for legacy entries.
@@ -1194,7 +1197,72 @@ function HistoryTab({ entries, goals, formats, onOpen }) {
 // would otherwise break position:fixed). The original row turns invisible and
 // surrounding rows shift with translateY to show where the item will land.
 
-const ROW_H = 52; // px per row including gap — used to compute ghost position and row shifts
+const ROW_H      = 52; // px per format row including gap
+const GOAL_ROW_H = 82; // px per goal row (taller due to textarea)
+
+/**
+ * Shared drag-to-reorder logic for FormatList and GoalList.
+ * Each rendered row must have the `data-drag-row` attribute for hit-testing.
+ *
+ * @param {number} rowH - Approximate row height in px, used for shift animation
+ * @returns Drag state, action handlers, and getShift() for CSS transforms
+ */
+function useDraggableList(rowH) {
+  const [dragging, setDragging] = useState(null); // index being dragged, null when idle
+  const [dragY,    setDragY]    = useState(0);    // current pointer Y in viewport coords
+  const [overIdx,  setOverIdx]  = useState(null); // index the item will land on
+  const listRef     = useRef(null);
+  // Refs mirror state so touch handlers (closed over stale values) can read
+  // the current drag position without needing to be re-registered each render.
+  const draggingRef = useRef(null);
+  const overIdxRef  = useRef(null);
+
+  useEffect(() => { draggingRef.current = dragging; }, [dragging]);
+  useEffect(() => { overIdxRef.current  = overIdx;  }, [overIdx]);
+
+  /** Finds which list index the pointer is hovering over based on row midpoints. */
+  const getOverIdx = clientY => {
+    if (!listRef.current) return 0;
+    const rows = [...listRef.current.querySelectorAll("[data-drag-row]")];
+    for (let i = 0; i < rows.length; i++) {
+      const rect = rows[i].getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) return i;
+    }
+    return rows.length - 1;
+  };
+
+  const startDrag = (clientY, i) => { setDragging(i); setDragY(clientY); setOverIdx(i); };
+  const moveDrag  = clientY => {
+    if (draggingRef.current === null) return;
+    setDragY(clientY);
+    setOverIdx(getOverIdx(clientY));
+  };
+
+  /**
+   * Ends the drag and resets state.
+   * @returns {{ from: number|null, to: number|null }} — caller reorders items when from !== to
+   */
+  const endDrag = () => {
+    const from = draggingRef.current;
+    const to   = overIdxRef.current;
+    setDragging(null);
+    setOverIdx(null);
+    return { from, to };
+  };
+
+  /**
+   * Returns the translateY offset (px) for row `i` during an active drag.
+   * Rows between the drag origin and hover target animate to make room.
+   */
+  const getShift = i => {
+    if (dragging === null || overIdx === null || i === dragging) return 0;
+    if (dragging < overIdx) { if (i > dragging && i <= overIdx) return -rowH; }
+    else                    { if (i >= overIdx && i < dragging) return rowH;  }
+    return 0;
+  };
+
+  return { dragging, dragY, overIdx, listRef, startDrag, moveDrag, endDrag, getShift };
+}
 
 function ToggleSwitch({ checked, onChange }) {
   return React.createElement("button", {
@@ -1222,59 +1290,20 @@ function ToggleSwitch({ checked, onChange }) {
 }
 
 function FormatList({ formats, onChange, onRename }) {
-  const [dragging, setDragging] = useState(null); // index of the row being dragged
-  const [dragY,    setDragY]    = useState(0);    // current cursor Y (viewport coords)
-  const [overIdx,  setOverIdx]  = useState(null); // index the dragged item would land on
-  const listRef    = useRef(null);
-  // Refs mirror state so touch event handlers (which close over stale state) can
-  // still read the current values without needing to be re-registered.
-  const draggingRef = useRef(null);
-  const overIdxRef  = useRef(null);
+  const { dragging, dragY, overIdx, listRef, startDrag, moveDrag, endDrag, getShift } = useDraggableList(ROW_H);
 
-  useEffect(() => { draggingRef.current = dragging; }, [dragging]);
-  useEffect(() => { overIdxRef.current  = overIdx;  }, [overIdx]);
+  const toggleActive = i => onChange(formats.map((f, j) => j === i ? { ...f, active: !f.active } : f));
+  const remove       = i => onChange(formats.filter((_, j) => j !== i));
 
-  /** Returns the index the dragged row should land on given a viewport Y. */
-  const getOverIdx = (clientY) => {
-    if (!listRef.current) return 0;
-    const rows = [...listRef.current.querySelectorAll("[data-fmt-row]")];
-    for (let i = 0; i < rows.length; i++) {
-      const rect = rows[i].getBoundingClientRect();
-      if (clientY < rect.top + rect.height / 2) return i;
-    }
-    return rows.length - 1;
-  };
-
-  const startDrag = (clientY, i) => { setDragging(i); setDragY(clientY); setOverIdx(i); };
-  const moveDrag  = (clientY)    => { if (draggingRef.current === null) return; setDragY(clientY); setOverIdx(getOverIdx(clientY)); };
-  const endDrag   = ()           => {
-    const from = draggingRef.current;
-    const to   = overIdxRef.current;
+  const handleEndDrag = () => {
+    const { from, to } = endDrag();
     if (from !== null && to !== null && from !== to) {
       const arr = [...formats];
       const [item] = arr.splice(from, 1);
       arr.splice(to, 0, item);
       onChange(arr);
     }
-    setDragging(null); setOverIdx(null);
   };
-
-  /**
-   * Returns the translateY offset (px) for row `i` while a drag is in progress.
-   * Rows between the drag origin and the current hover target slide to make room.
-   */
-  const getShift = (i) => {
-    if (dragging === null || overIdx === null || i === dragging) return 0;
-    if (dragging < overIdx) {
-      if (i > dragging && i <= overIdx) return -ROW_H;
-    } else {
-      if (i >= overIdx && i < dragging) return ROW_H;
-    }
-    return 0;
-  };
-
-  const toggleActive = (i) => onChange(formats.map((f, j) => j === i ? { ...f, active: !f.active } : f));
-  const remove       = (i) => onChange(formats.filter((_, j) => j !== i));
 
   // Tracks the name when an input is focused so onRename fires only on actual change.
   const focusedNameRef = useRef("");
@@ -1311,17 +1340,16 @@ function FormatList({ formats, onChange, onRename }) {
       ref: listRef,
       style: { display: "flex", flexDirection: "column", gap: 6 },
       onMouseMove:  e => moveDrag(e.clientY),
-      onMouseUp:    endDrag,
-      onMouseLeave: dragging !== null ? endDrag : undefined,
+      onMouseUp:    handleEndDrag,
+      onMouseLeave: dragging !== null ? handleEndDrag : undefined,
     },
       formats.map((f, i) => {
         const isDragged = dragging === i;
-        const shift = getShift(i);
         // key: f.name (not index) so React correctly reconciles rows after
         // reorder/delete and doesn't assign edit state to the wrong row.
         return React.createElement("div", {
           key: f.name,
-          "data-fmt-row": true,
+          "data-drag-row": true,
           style: {
             background: "var(--surface)",
             border: "1px solid var(--border)",
@@ -1329,7 +1357,7 @@ function FormatList({ formats, onChange, onRename }) {
             padding: "10px 12px",
             display: "flex", alignItems: "center", gap: 10,
             opacity: isDragged ? 0 : 1,
-            transform: `translateY(${shift}px)`,
+            transform: `translateY(${getShift(i)}px)`,
             transition: isDragged ? "opacity 0.1s" : "transform 0.18s cubic-bezier(0.25,0.46,0.45,0.94), opacity 0.1s",
             userSelect: "none",
             willChange: "transform",
@@ -1340,7 +1368,7 @@ function FormatList({ formats, onChange, onRename }) {
             onMouseDown:  e => { e.preventDefault(); startDrag(e.clientY, i); },
             onTouchStart: e => { e.preventDefault(); e.stopPropagation(); startDrag(e.touches[0].clientY, i); },
             onTouchMove:  e => { e.preventDefault(); e.stopPropagation(); moveDrag(e.touches[0].clientY); },
-            onTouchEnd:   e => { e.stopPropagation(); endDrag(); },
+            onTouchEnd:   e => { e.stopPropagation(); handleEndDrag(); },
           }, "⠿"),
 
           React.createElement("input", {
@@ -1379,54 +1407,24 @@ function FormatList({ formats, onChange, onRename }) {
 
 // ─── Goal list ────────────────────────────────────────────────────────────────
 // Draggable, editable list of goal objects { id, text, active }.
-// Modeled after FormatList — same portal pattern for drag ghost.
-
-const GOAL_ROW_H = 82; // approximate px per row — used for shift animation
+// Uses the shared useDraggableList hook — same portal pattern as FormatList.
 
 function GoalList({ goals, onChange }) {
-  const [dragging, setDragging] = useState(null);
-  const [dragY,    setDragY]    = useState(0);
-  const [overIdx,  setOverIdx]  = useState(null);
-  const listRef    = useRef(null);
-  const draggingRef = useRef(null);
-  const overIdxRef  = useRef(null);
+  const { dragging, dragY, overIdx, listRef, startDrag, moveDrag, endDrag, getShift } = useDraggableList(GOAL_ROW_H);
 
-  useEffect(() => { draggingRef.current = dragging; }, [dragging]);
-  useEffect(() => { overIdxRef.current  = overIdx;  }, [overIdx]);
+  const toggleActive = i => onChange(goals.map((g, j) => j === i ? { ...g, active: !g.active } : g));
+  const remove       = i => { if (window.confirm("Delete this goal?")) onChange(goals.filter((_, j) => j !== i)); };
+  const setText      = (i, v) => onChange(goals.map((g, j) => j === i ? { ...g, text: v } : g));
 
-  const getOverIdx = clientY => {
-    if (!listRef.current) return 0;
-    const rows = [...listRef.current.querySelectorAll("[data-goal-row]")];
-    for (let i = 0; i < rows.length; i++) {
-      const rect = rows[i].getBoundingClientRect();
-      if (clientY < rect.top + rect.height / 2) return i;
-    }
-    return rows.length - 1;
-  };
-
-  const startDrag = (clientY, i) => { setDragging(i); setDragY(clientY); setOverIdx(i); };
-  const moveDrag  = clientY => { if (draggingRef.current === null) return; setDragY(clientY); setOverIdx(getOverIdx(clientY)); };
-  const endDrag   = () => {
-    const from = draggingRef.current, to = overIdxRef.current;
+  const handleEndDrag = () => {
+    const { from, to } = endDrag();
     if (from !== null && to !== null && from !== to) {
       const arr = [...goals];
       const [item] = arr.splice(from, 1);
       arr.splice(to, 0, item);
       onChange(arr);
     }
-    setDragging(null); setOverIdx(null);
   };
-
-  const getShift = i => {
-    if (dragging === null || overIdx === null || i === dragging) return 0;
-    if (dragging < overIdx) { if (i > dragging && i <= overIdx) return -GOAL_ROW_H; }
-    else                    { if (i >= overIdx && i < dragging) return GOAL_ROW_H; }
-    return 0;
-  };
-
-  const toggleActive = i => onChange(goals.map((g, j) => j === i ? { ...g, active: !g.active } : g));
-  const remove       = i => { if (window.confirm("Delete this goal?")) onChange(goals.filter((_, j) => j !== i)); };
-  const setText      = (i, v) => onChange(goals.map((g, j) => j === i ? { ...g, text: v } : g));
 
   const ghostGoal = dragging !== null ? goals[dragging] : null;
 
@@ -1451,14 +1449,14 @@ function GoalList({ goals, onChange }) {
       ref: listRef,
       style: { display: "flex", flexDirection: "column", gap: 6 },
       onMouseMove: e => moveDrag(e.clientY),
-      onMouseUp: endDrag,
-      onMouseLeave: dragging !== null ? endDrag : undefined,
+      onMouseUp: handleEndDrag,
+      onMouseLeave: dragging !== null ? handleEndDrag : undefined,
     },
       goals.map((g, i) => {
         const isDragged = dragging === i;
         return React.createElement("div", {
           key: g.id,
-          "data-goal-row": true,
+          "data-drag-row": true,
           style: {
             background: "var(--surface)", border: "1px solid var(--border)",
             borderRadius: "var(--radius-sm)", padding: "8px 10px",
@@ -1474,7 +1472,7 @@ function GoalList({ goals, onChange }) {
             onMouseDown:  e => { e.preventDefault(); startDrag(e.clientY, i); },
             onTouchStart: e => { e.preventDefault(); e.stopPropagation(); startDrag(e.touches[0].clientY, i); },
             onTouchMove:  e => { e.preventDefault(); e.stopPropagation(); moveDrag(e.touches[0].clientY); },
-            onTouchEnd:   e => { e.stopPropagation(); endDrag(); },
+            onTouchEnd:   e => { e.stopPropagation(); handleEndDrag(); },
           }, "⠿"),
           React.createElement("textarea", {
             value: g.text, rows: 2,
@@ -1840,61 +1838,13 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onF
   );
 }
 
-// ─── Detail view ──────────────────────────────────────────────────────────────
-
-function DetailView({ entry, goals, onEdit, onDelete, onBack }) {
-  const entryGoals = entry.goals && !Array.isArray(entry.goals) ? entry.goals : {};
-  const score = Object.values(entryGoals).filter(Boolean).length;
-  const total = Object.keys(entryGoals).length;
-  const hasScore = entry.wins != null && entry.losses != null;
-  const s = RESULT_STYLE[entry.result] || { background: "var(--surface2)", color: "var(--text2)" };
-  // Show goals that exist in current settings; fall back to all entry goal IDs if none match.
-  const displayGoals = goals.filter(g => g.id in entryGoals);
-  return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
-    React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
-      React.createElement("button", { className: "btn-ghost", onClick: onBack, style: { fontSize: 13 } }, "‹ Back"),
-      React.createElement("span", { style: { fontWeight: 600, fontSize: 15, flex: 1, color: "var(--text)" } }, `${entry.format} — ${fmtDateLong(entry.date)}`),
-      entry.result && React.createElement("span", {
-        style: { fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 6, letterSpacing: "0.04em", ...s }
-      }, hasScore ? `${entry.result} — ${entry.wins}/${entry.losses}` : entry.result)
-    ),
-    React.createElement("div", { className: "goals-box" },
-      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 12 } },
-        React.createElement("span", { style: { fontWeight: 600, fontSize: 14, color: "var(--text)" } }, "Mental game goals"),
-        React.createElement("span", { style: { fontSize: 12, color: "var(--text2)" } }, `${score}/${total}`)
-      ),
-      displayGoals.map(g =>
-        React.createElement("div", { key: g.id, style: { display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10 } },
-          entryGoals[g.id]
-            ? React.createElement("svg", { width: 18, height: 18, viewBox: "0 0 18 18", style: { flexShrink: 0, marginTop: 2 } },
-                React.createElement("circle", { cx: 9, cy: 9, r: 9, fill: "#059669" }),
-                React.createElement("path", { d: "M5 9l3 3 5-5", stroke: "#fff", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", fill: "none" })
-              )
-            : React.createElement("svg", { width: 18, height: 18, viewBox: "0 0 18 18", style: { flexShrink: 0, marginTop: 2 } },
-                React.createElement("circle", { cx: 9, cy: 9, r: 8.5, fill: "none", stroke: "var(--border2)", strokeWidth: 1 })
-              ),
-          React.createElement("span", { style: { fontSize: 14, color: entryGoals[g.id] ? "var(--text)" : "var(--text3)", lineHeight: 1.5 } }, g.text)
-        )
-      )
-    ),
-    entry.notes && React.createElement("div", { className: "notes-box" },
-      React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: "var(--text2)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" } }, "Notes"),
-      React.createElement("p", { style: { margin: 0, fontSize: 14, lineHeight: 1.6, color: "var(--text)" } }, entry.notes)
-    ),
-    React.createElement("div", { style: { display: "flex", gap: 10, justifyContent: "flex-end" } },
-      React.createElement("button", { className: "btn-danger", onClick: onDelete }, "Delete"),
-      React.createElement("button", { className: "btn-ghost",  onClick: onEdit  }, "Edit")
-    )
-  );
-}
-
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 function App({ uid, user }) {
   const [settings,    setSettings]    = useState(loadSettings);
   const [entries,     setEntries]     = useState(() => cacheLoad().sort((a, b) => b.id - a.id));
   const [tab,         setTab]         = useState("Daily");
-  const [view,        setView]        = useState("tabs");  // "tabs" | "log" | "detail" | "edit"
+  const [view,        setView]        = useState("tabs");  // "tabs" | "edit"
   const [dailyDate,   setDailyDate]   = useState(todayStr);
   const [selected,    setSelected]    = useState(null);   // the entry open in detail/edit view
   const [loading,     setLoading]     = useState(true);   // true only on first load when cache is empty
@@ -1915,9 +1865,8 @@ function App({ uid, user }) {
 
   useEffect(() => {
     const handler = () => {
-      if      (view === "log")    setView("tabs");
-      else if (view === "edit")   { setSelected(null); setView("tabs"); }
-      else if (view === "detail") { setSelected(null); setView("tabs"); }
+      if      (view === "log")  setView("tabs");
+      else if (view === "edit") { setSelected(null); setView("tabs"); }
     };
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);
@@ -2109,7 +2058,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.28"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.29"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
@@ -2149,16 +2098,6 @@ function App({ uid, user }) {
           )
     ),
 
-
-    // ── Entry detail ──
-    view === "detail" && selected && React.createElement("div", { style: { flex: 1, overflowY: "auto", minHeight: 0, padding: "0 0 env(safe-area-inset-bottom, 16px)" } },
-      React.createElement(DetailView, {
-        entry: selected, goals,
-        onBack:   () => { setSelected(null); setView("tabs"); },
-        onEdit:   () => setView("edit"),
-        onDelete: deleteEntry,
-      })
-    ),
 
     // ── Scroll-to-top FAB (History tab only) ──
     tab === "History" && view === "tabs" && ReactDOM.createPortal(
