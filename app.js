@@ -48,15 +48,22 @@ const RESULT_STYLE = {
 };
 
 const ACCENT_OPTIONS = [
-  { key: "purple", label: "Purple", color: "#3C3489" },
-  { key: "blue",   label: "Blue",   color: "#185FA5" },
-  { key: "teal",   label: "Teal",   color: "#0F6E56" },
-  { key: "green",  label: "Green",  color: "#3B6D11" },
-  { key: "coral",  label: "Coral",  color: "#993C1D" },
-  { key: "pink",   label: "Pink",   color: "#993556" },
-  { key: "indigo", label: "Indigo", color: "#5B21B6" },
-  { key: "amber",  label: "Amber",  color: "#D97706" },
-  { key: "red",    label: "Red",    color: "#DC2626" },
+  { key: "purple",   label: "Purple",   color: "#3C3489" },
+  { key: "blue",     label: "Blue",     color: "#185FA5" },
+  { key: "teal",     label: "Teal",     color: "#0F6E56" },
+  { key: "green",    label: "Green",    color: "#3B6D11" },
+  { key: "coral",    label: "Coral",    color: "#993C1D" },
+  { key: "pink",     label: "Pink",     color: "#993556" },
+  { key: "indigo",   label: "Indigo",   color: "#5B21B6" },
+  { key: "amber",    label: "Amber",    color: "#D97706" },
+  { key: "red",      label: "Red",      color: "#DC2626" },
+  { key: "navy",     label: "Navy",     color: "#1E3A5F" },
+  { key: "lime",     label: "Lime",     color: "#4D7C0F" },
+  { key: "cyan",     label: "Cyan",     color: "#0E7490" },
+  { key: "fuchsia",  label: "Fuchsia",  color: "#86198F" },
+  { key: "rust",     label: "Rust",     color: "#7C2D12" },
+  { key: "slate",    label: "Slate",    color: "#475569" },
+  { key: "graphite", label: "Graphite", color: "#374151" },
 ];
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -513,20 +520,30 @@ function ScrollPanel({ children, style }) {
     if (!el || !inner || !ptr) return;
 
     const PTR_THRESHOLD = 64;
+    const SPRING = 'transform 0.38s cubic-bezier(0.34,1.56,0.64,1)';
     let startX = 0, startY = 0, startTop = 0, mode = null, pullY = 0;
-    let lastScrollTop = 0, hitBottom = false;
+    let bottomHitY = null; // clientY at which bottom boundary was first hit
+
+    const stretchScale = overdrag => 1 + Math.sqrt(Math.max(0, overdrag)) * 0.013;
+
+    const springBack = () => {
+      inner.style.transition = SPRING;
+      inner.style.transform  = '';
+      setTimeout(() => { inner.style.transition = ''; }, 400);
+    };
 
     const onTouchStart = e => {
       startX = e.touches[0].clientX;
       startY = e.touches[0].clientY;
       startTop = el.scrollTop;
-      lastScrollTop = el.scrollTop;
-      mode = null; pullY = 0; hitBottom = false;
+      mode = null; pullY = 0; bottomHitY = null;
     };
 
     const onTouchMove = e => {
-      const dy  = e.touches[0].clientY - startY;
+      const currentY = e.touches[0].clientY;
+      const dy  = currentY - startY;
       const adx = Math.abs(e.touches[0].clientX - startX);
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 1;
 
       // Determine mode on first decisive move
       if (mode === null && (Math.abs(dy) > 8 || adx > 8)) {
@@ -544,10 +561,17 @@ function ScrollPanel({ children, style }) {
         return;
       }
 
-      // Track overscroll at bottom (scroll stuck but finger still dragging up)
-      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 2;
-      if (atBottom && el.scrollTop === lastScrollTop && dy < -8) hitBottom = true;
-      lastScrollTop = el.scrollTop;
+      // Reactive bottom stretch — live during drag
+      if (atBottom && dy < 0) {
+        if (bottomHitY === null) bottomHitY = currentY; // record where bottom was first hit
+        const overdrag = bottomHitY - currentY;         // px dragged past bottom
+        inner.style.transition = 'none';
+        inner.style.transform  = `scaleY(${stretchScale(overdrag).toFixed(5)})`;
+      } else if (bottomHitY !== null) {
+        // Scrolled back up off the bottom boundary mid-gesture — spring back immediately
+        bottomHitY = null;
+        springBack();
+      }
     };
 
     const onTouchEnd = () => {
@@ -563,21 +587,27 @@ function ScrollPanel({ children, style }) {
           ptr.style.opacity      = '0';
           setTimeout(() => { inner.style.transition = ''; ptr.style.transition = ''; }, 300);
         }
-      } else if (hitBottom && !inner.classList.contains('scroll-bounce')) {
-        inner.classList.add('scroll-bounce');
-        inner.addEventListener('animationend', () => inner.classList.remove('scroll-bounce'), { once: true });
+      } else if (bottomHitY !== null) {
+        springBack();
+        bottomHitY = null;
       }
-      mode = null; pullY = 0; hitBottom = false;
+      mode = null; pullY = 0;
     };
 
-    // Wheel bounce (desktop/trackpad)
+    // Wheel stretch (trackpad / desktop mouse wheel)
+    let wheelAccum = 0, wheelTimer = null;
     const onWheel = e => {
-      if (e.deltaY <= 0) return;
-      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 2;
-      if (atBottom && !inner.classList.contains('scroll-bounce')) {
-        inner.classList.add('scroll-bounce');
-        inner.addEventListener('animationend', () => inner.classList.remove('scroll-bounce'), { once: true });
-      }
+      if (e.deltaY <= 0) { wheelAccum = 0; return; }
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 1;
+      if (!atBottom) { wheelAccum = 0; return; }
+      wheelAccum = Math.min(wheelAccum + e.deltaY * 0.6, 120);
+      inner.style.transition = 'none';
+      inner.style.transform  = `scaleY(${stretchScale(wheelAccum).toFixed(5)})`;
+      clearTimeout(wheelTimer);
+      wheelTimer = setTimeout(() => {
+        springBack();
+        wheelAccum = 0;
+      }, 80);
     };
 
     el.addEventListener('touchstart', onTouchStart, { passive: true });
@@ -589,6 +619,7 @@ function ScrollPanel({ children, style }) {
       el.removeEventListener('touchmove',  onTouchMove);
       el.removeEventListener('touchend',   onTouchEnd);
       el.removeEventListener('wheel',      onWheel);
+      clearTimeout(wheelTimer);
     };
   }, []);
 
@@ -606,7 +637,10 @@ function ScrollPanel({ children, style }) {
         pointerEvents: "none", userSelect: "none", zIndex: 10,
       }
     }),
-    React.createElement("div", { ref: innerRef }, children)
+    React.createElement("div", {
+      ref: innerRef,
+      style: { transformOrigin: "center bottom" },
+    }, children)
   );
 }
 
@@ -1655,7 +1689,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.13"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.14"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
