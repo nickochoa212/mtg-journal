@@ -695,7 +695,7 @@ function ScrollPanel({ children, style }) {
     let startX = 0, startY = 0, startTop = 0, mode = null, pullY = 0;
     let bottomHitY = null; // clientY at which bottom boundary was first hit
 
-    const stretchScale = overdrag => 1 + Math.sqrt(Math.max(0, overdrag)) * 0.013;
+    const stretchScale = overdrag => 1 + Math.sqrt(Math.max(0, overdrag)) * 0.006;
 
     const springBack = () => {
       inner.style.transition = SPRING;
@@ -771,7 +771,7 @@ function ScrollPanel({ children, style }) {
       if (e.deltaY <= 0) { wheelAccum = 0; return; }
       const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 1;
       if (!atBottom) { wheelAccum = 0; return; }
-      wheelAccum = Math.min(wheelAccum + e.deltaY * 0.6, 120);
+      wheelAccum = Math.min(wheelAccum + e.deltaY * 0.4, 60);
       inner.style.transition = 'none';
       inner.style.transform  = `scaleY(${stretchScale(wheelAccum).toFixed(5)})`;
       clearTimeout(wheelTimer);
