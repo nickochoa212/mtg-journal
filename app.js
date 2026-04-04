@@ -921,23 +921,30 @@ function DailyTab({ entries, goals, date, onOpen, onSave, settings, onFormatChan
 const DATE_PRESETS = ["All time", "Today", "7 days", "30 days", "Custom"];
 
 const SORT_OPTIONS = [
-  { key: "date-desc", label: "Date ↓" },
-  { key: "date-asc",  label: "Date ↑" },
-  { key: "format",    label: "Format" },
-  { key: "result",    label: "Result" },
+  { key: "date-desc",  label: "Date ↓" },
+  { key: "date-asc",   label: "Date ↑" },
+  { key: "format",     label: "Format" },
+  { key: "result",     label: "Result" },
+  { key: "goals-desc", label: "Goals ↓" },
+  { key: "goals-asc",  label: "Goals ↑" },
 ];
 const GROUP_OPTIONS = [
   { key: "none",   label: "None" },
   { key: "format", label: "Format" },
   { key: "result", label: "Result" },
+  { key: "goals",  label: "Goals met" },
   { key: "week",   label: "Week" },
   { key: "month",  label: "Month" },
 ];
 
+const goalsCount = e => Object.values(e.goals || {}).filter(Boolean).length;
+
 function sortEntries(arr, sortKey) {
   const copy = [...arr];
-  if (sortKey === "date-asc")  return copy.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.id - b.id);
-  if (sortKey === "format")    return copy.sort((a, b) => (a.format || "").localeCompare(b.format || ""));
+  if (sortKey === "date-asc")   return copy.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.id - b.id);
+  if (sortKey === "format")     return copy.sort((a, b) => (a.format || "").localeCompare(b.format || ""));
+  if (sortKey === "goals-desc") return copy.sort((a, b) => goalsCount(b) - goalsCount(a) || b.id - a.id);
+  if (sortKey === "goals-asc")  return copy.sort((a, b) => goalsCount(a) - goalsCount(b) || a.id - b.id);
   if (sortKey === "result") {
     const order = { Win: 0, Draw: 1, Lose: 2 };
     return copy.sort((a, b) => (order[a.result] ?? 3) - (order[b.result] ?? 3) || b.id - a.id);
@@ -954,6 +961,8 @@ function groupEntries(arr, groupKey) {
       key = e.format || "Unknown";
     } else if (groupKey === "result") {
       key = e.result || "Unknown";
+    } else if (groupKey === "goals") {
+      key = String(goalsCount(e));
     } else if (groupKey === "month") {
       key = e.date ? e.date.slice(0, 7) : "Unknown";
     } else if (groupKey === "week") {
@@ -971,6 +980,8 @@ function groupEntries(arr, groupKey) {
   if (groupKey === "result") {
     const order = { Win: 0, Draw: 1, Lose: 2 };
     keys.sort((a, b) => (order[a] ?? 3) - (order[b] ?? 3));
+  } else if (groupKey === "goals") {
+    keys.sort((a, b) => +b - +a); // most goals first
   } else if (groupKey === "month" || groupKey === "week") {
     keys.sort((a, b) => b.localeCompare(a));
   } else {
@@ -981,6 +992,8 @@ function groupEntries(arr, groupKey) {
     if (groupKey === "month") {
       const [y, m] = k.split("-");
       label = new Date(+y, +m - 1, 1).toLocaleString("default", { month: "long", year: "numeric" });
+    } else if (groupKey === "goals") {
+      label = `${k} goal${k === "1" ? "" : "s"} met`;
     } else if (groupKey === "week") {
       const d = new Date(k + "T00:00:00");
       label = "Week of " + d.toLocaleDateString("default", { month: "short", day: "numeric", year: "numeric" });
@@ -2096,7 +2109,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.27"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.28"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
@@ -2148,7 +2161,7 @@ function App({ uid, user }) {
     ),
 
     // ── Scroll-to-top FAB (History tab only) ──
-    tab === "History" && view === "tabs" && historyScrolled && ReactDOM.createPortal(
+    tab === "History" && view === "tabs" && ReactDOM.createPortal(
       React.createElement("button", {
         onClick: () => { if (historyScrollRef.current) historyScrollRef.current.scrollTo({ top: 0, behavior: "smooth" }); },
         style: {
@@ -2159,6 +2172,10 @@ function App({ uid, user }) {
           boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
           display: "flex", alignItems: "center", justifyContent: "center",
           zIndex: 200,
+          opacity: historyScrolled ? 1 : 0,
+          transform: historyScrolled ? "scale(1)" : "scale(0.6)",
+          pointerEvents: historyScrolled ? "auto" : "none",
+          transition: "opacity 0.2s, transform 0.25s cubic-bezier(0.34,1.56,0.64,1)",
         }
       }, "↑"),
       document.body
