@@ -1922,7 +1922,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.18"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.19"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
@@ -1974,7 +1974,7 @@ function App({ uid, user }) {
     ),
 
     // ── Edit entry ──
-    view === "edit" && selected && React.createElement("div", { style: { flex: 1, overflowY: "auto", minHeight: 0, padding: "0 0 env(safe-area-inset-bottom, 16px)" } },
+    view === "edit" && selected && React.createElement("div", { style: { flex: 1, overflowY: "auto", minHeight: 0, padding: "0 8px env(safe-area-inset-bottom, 16px)" } },
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "Edit entry"),
         React.createElement("button", {
