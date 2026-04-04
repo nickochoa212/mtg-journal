@@ -1916,7 +1916,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.16"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.17"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
@@ -1990,7 +1990,12 @@ function Root() {
   const [user, setUser] = useState(undefined); // undefined=loading, null=signed out, object=signed in
 
   useEffect(() => {
-    return auth.onAuthStateChanged(u => setUser(u));
+    // Safety net: if Firebase scripts are slow to load (cold cache, slow network),
+    // onAuthStateChanged may not fire for a long time. After 3 s, assume signed-out
+    // so the user sees the login screen rather than a frozen spinner.
+    const timeout = setTimeout(() => setUser(u => u === undefined ? null : u), 3000);
+    const unsub = auth.onAuthStateChanged(u => { clearTimeout(timeout); setUser(u); });
+    return () => { clearTimeout(timeout); unsub(); };
   }, []);
 
   if (user === undefined) {
