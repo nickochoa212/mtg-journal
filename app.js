@@ -12,8 +12,6 @@ firebase.initializeApp({
 const auth = firebase.auth();
 const db   = firebase.firestore();
 
-// ─── Google Sheets URL — only used by the one-time migration import ───────────
-const SHEETS_URL = "https://script.google.com/macros/s/AKfycby3Dj3LEz3AcIfAfUGhOurzZZlMrXQyrF03AfDZ0rABMtPq23tzL8g4PiuGpteBW9zAqQ/exec";
 
 const { useState, useEffect, useRef } = React;
 
@@ -218,33 +216,6 @@ async function firestoreSaveSettings(uid, s) {
   await settingsDoc(uid).set(s);
 }
 
-/**
- * One-time migration: fetches all entries + settings from the Google Sheet
- * and batch-writes them to Firestore. Resolves with the count of entries imported.
- */
-async function migrateFromSheets(uid) {
-  const res = await fetch(SHEETS_URL);
-  if (!res.ok) throw new Error("Could not reach Google Sheet");
-  const data = await res.json();
-  const rawEntries    = Array.isArray(data) ? data : (data.entries || []);
-  const sheetSettings = Array.isArray(data) ? null : data.settings;
-
-  // Firestore batch writes are capped at 500 operations each
-  const col = entriesCol(uid);
-  let batch = db.batch();
-  let count = 0;
-  const commits = [];
-  for (const entry of rawEntries) {
-    batch.set(col.doc(String(entry.id)), entry);
-    count++;
-    if (count % 500 === 0) { commits.push(batch.commit()); batch = db.batch(); }
-  }
-  commits.push(batch.commit());
-  await Promise.all(commits);
-
-  if (sheetSettings) await firestoreSaveSettings(uid, sheetSettings);
-  return rawEntries.length;
-}
 
 // ─── Small shared components ──────────────────────────────────────────────────
 
@@ -822,7 +793,6 @@ function SettingsTab({ settings, onSave, onFormatRename, lastSynced, uid, user }
   const [accent,        setAccent]        = useState(settings.accent);
   const [darkMode,      setDarkMode]      = useState(settings.darkMode);
   const [newFmt,        setNewFmt]        = useState("");
-  const [migrateStatus, setMigrateStatus] = useState(null); // null | "migrating" | {ok:n} | {error:msg}
   const mounted = useRef(false);
 
   useEffect(() => { applyTheme(accent, darkMode); }, [accent, darkMode]);
@@ -847,13 +817,6 @@ function SettingsTab({ settings, onSave, onFormatRename, lastSynced, uid, user }
 
   const setGoal = (i, v) => setGoals(goals.map((g, j) => j === i ? v : g));
 
-  /** Pulls all entries + settings from the Google Sheet and writes them to Firestore. */
-  const migrateNow = () => {
-    setMigrateStatus("migrating");
-    migrateFromSheets(uid)
-      .then(count => setMigrateStatus({ ok: count }))
-      .catch(err   => setMigrateStatus({ error: err.message }));
-  };
 
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 28 } },
 
@@ -940,26 +903,6 @@ function SettingsTab({ settings, onSave, onFormatRename, lastSynced, uid, user }
       ),
       lastSynced && React.createElement("div", { style: { marginTop: 6, fontSize: 12, color: "var(--text3)" } },
         `Last loaded from cloud: ${fmtTimeAgo(lastSynced)}`
-      )
-    ),
-
-    React.createElement("div", null,
-      React.createElement(SectionLabel, null, "Import from Google Sheets"),
-      React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginBottom: 10 } },
-        "One-time migration. Imports all entries and settings from your Google Sheet into Firestore. Entries with the same ID will be overwritten."
-      ),
-      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
-        React.createElement("button", {
-          className: "btn-primary",
-          onClick: migrateNow,
-          disabled: migrateStatus === "migrating",
-        }, migrateStatus === "migrating" ? "Importing…" : "Import"),
-        migrateStatus?.ok != null && React.createElement("span", { style: { fontSize: 12, color: "#059669" } },
-          `Imported ${migrateStatus.ok} ${migrateStatus.ok === 1 ? "entry" : "entries"}`
-        ),
-        migrateStatus?.error && React.createElement("span", { style: { fontSize: 12, color: "#dc2626" } },
-          migrateStatus.error
-        ),
       )
     ),
 
@@ -1382,7 +1325,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.0.20"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.0"),
         ),
         tab === "Daily" && React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
