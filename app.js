@@ -211,12 +211,12 @@ function loadSettings() {
     return {
       formats,
       goals:      s.goals      || DEFAULT_GOALS,
-      accent:     s.accent     || "purple",
+      accent:     s.accent     || "cyan",
       darkMode:   s.darkMode   || "auto",
       lastFormat: s.lastFormat || "",
     };
   } catch {
-    return { formats: DEFAULT_FORMATS, goals: DEFAULT_GOALS, accent: "purple", darkMode: "auto", lastFormat: "" };
+    return { formats: DEFAULT_FORMATS, goals: DEFAULT_GOALS, accent: "cyan", darkMode: "auto", lastFormat: "" };
   }
 }
 
@@ -632,8 +632,11 @@ function TabSlider({ tab, setTab, setDailyDate, indicatorRef, children }) {
     if (!t) return;
     const dx = e.touches[0].clientX - t.x;
     const dy = e.touches[0].clientY - t.y;
-    // Only activate horizontal swipe if clearly more horizontal than vertical
-    if (!t.swiping && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) t.swiping = true;
+    // Lock to vertical if clearly scrolling down; lock to horizontal swipe if clearly swiping.
+    if (!t.swiping && !t.lockedVertical) {
+      if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 8) { t.lockedVertical = true; }
+      else if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) { t.swiping = true; }
+    }
     if (!t.swiping) return;
     const el = sliderRef.current;
     if (!el) return;
@@ -1883,7 +1886,7 @@ function App({ uid, user }) {
     const entry = { ...form, id: Date.now() };
     setAndCache([entry, ...entries]);
     setView("tabs");
-    firestoreUpsert(uid, entry).catch(() => {
+    if (!testMode) firestoreUpsert(uid, entry).catch(() => {
       setError("Saved locally but Firestore sync failed.");
     });
   };
@@ -1894,7 +1897,7 @@ function App({ uid, user }) {
     setAndCache(entries.map(e => e.id === selected.id ? updated : e));
     setSelected(null);
     setView("tabs");
-    firestoreUpsert(uid, updated).catch(() => {
+    if (!testMode) firestoreUpsert(uid, updated).catch(() => {
       setError("Saved locally but Firestore sync failed.");
     });
   };
@@ -1905,7 +1908,7 @@ function App({ uid, user }) {
     setAndCache(entries.filter(e => e.id !== id));
     setSelected(null);
     setView("tabs");
-    firestoreRemove(uid, id).catch(() => {
+    if (!testMode) firestoreRemove(uid, id).catch(() => {
       setError("Deleted locally but Firestore sync failed.");
     });
   };
@@ -1956,7 +1959,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.22"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.23"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
