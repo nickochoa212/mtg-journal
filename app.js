@@ -1168,12 +1168,14 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onF
     // Spacer so content doesn't hide behind the fixed action bar
     React.createElement("div", { style: { height: 72 } }),
 
-    isActive && ReactDOM.createPortal(
+    ReactDOM.createPortal(
       React.createElement("div", {
         style: {
           position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 200,
           background: "var(--surface)", borderTop: "1px solid var(--border)",
           padding: `12px 16px calc(12px + env(safe-area-inset-bottom, 0px))`,
+          transform: isActive ? "translateY(0)" : "translateY(110%)",
+          transition: "transform 0.3s cubic-bezier(0.32,0.72,0,1)",
         }
       },
         React.createElement("div", {
@@ -1408,7 +1410,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.3"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.4"),
         ),
         tab === "Daily" && React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
