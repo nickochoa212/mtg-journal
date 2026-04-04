@@ -697,8 +697,6 @@ function HistoryTab({ entries, goals, formats, onOpen }) {
 const ROW_H = 52; // px per row including gap — used to compute ghost position and row shifts
 
 function FormatList({ formats, onChange, onRename }) {
-  const [editing,  setEditing]  = useState(null); // index of the row being renamed
-  const [editVal,  setEditVal]  = useState("");
   const [dragging, setDragging] = useState(null); // index of the row being dragged
   const [dragY,    setDragY]    = useState(0);    // current cursor Y (viewport coords)
   const [overIdx,  setOverIdx]  = useState(null); // index the dragged item would land on
@@ -753,15 +751,8 @@ function FormatList({ formats, onChange, onRename }) {
   const toggleActive = (i) => onChange(formats.map((f, j) => j === i ? { ...f, active: !f.active } : f));
   const remove       = (i) => onChange(formats.filter((_, j) => j !== i));
 
-  const commitEdit = (i) => {
-    const trimmed = editVal.trim();
-    if (trimmed && trimmed !== formats[i].name) {
-      onChange(formats.map((f, j) => j === i ? { ...f, name: trimmed } : f));
-      // Notify parent so it can propagate the rename to existing entries
-      if (onRename) onRename(formats[i].name, trimmed);
-    }
-    setEditing(null);
-  };
+  // Tracks the name when an input is focused so onRename fires only on actual change.
+  const focusedNameRef = useRef("");
 
   const ghostFmt = dragging !== null ? formats[dragging] : null;
 
@@ -832,23 +823,26 @@ function FormatList({ formats, onChange, onRename }) {
             onTouchEnd:   e => { e.stopPropagation(); endDrag(); },
           }, "⠿"),
 
-          editing === i
-            ? React.createElement("input", {
-                autoFocus: true,
-                value: editVal,
-                onChange: e => setEditVal(e.target.value),
-                onBlur:   () => commitEdit(i),
-                onKeyDown: e => { if (e.key === "Enter") commitEdit(i); if (e.key === "Escape") setEditing(null); },
-                style: { flex: 1, fontSize: 14, padding: "2px 6px" },
-              })
-            : React.createElement("span", {
-                style: {
-                  flex: 1, fontSize: 14, cursor: "text",
-                  color: f.active ? "var(--text)" : "var(--text3)",
-                  textDecoration: f.active ? "none" : "line-through",
-                },
-                onClick: () => { setEditing(i); setEditVal(f.name); },
-              }, f.name),
+          React.createElement("input", {
+            value: f.name,
+            onChange: e => onChange(formats.map((fmt, j) => j === i ? { ...fmt, name: e.target.value } : fmt)),
+            onFocus: () => { focusedNameRef.current = f.name; },
+            onBlur: e => {
+              const trimmed = e.target.value.trim();
+              const old = focusedNameRef.current;
+              if (!trimmed) {
+                onChange(formats.map((fmt, j) => j === i ? { ...fmt, name: old } : fmt));
+              } else if (trimmed !== old && onRename) {
+                onRename(old, trimmed);
+              }
+            },
+            onKeyDown: e => { if (e.key === "Enter" || e.key === "Escape") e.target.blur(); },
+            style: {
+              flex: 1, fontSize: 14,
+              color: f.active ? "var(--text)" : "var(--text3)",
+              textDecoration: f.active ? "none" : "line-through",
+            },
+          }),
 
           React.createElement("button", {
             onClick: () => toggleActive(i),
@@ -861,9 +855,9 @@ function FormatList({ formats, onChange, onRename }) {
           }, f.active ? "Active" : "Hidden"),
 
           React.createElement("button", {
-            onClick: () => remove(i),
+            onClick: () => { if (window.confirm(`Delete "${f.name}"?`)) remove(i); },
             title: "Delete",
-            style: { background: "none", border: "none", cursor: "pointer", color: "var(--text3)", fontSize: 18, lineHeight: 1, padding: "0 2px", flexShrink: 0 }
+            style: { background: "none", border: "none", cursor: "pointer", color: "#dc2626", fontSize: 18, lineHeight: 1, padding: "0 2px", flexShrink: 0 }
           }, "×")
         );
       })
@@ -919,7 +913,7 @@ function GoalList({ goals, onChange }) {
   };
 
   const toggleActive = i => onChange(goals.map((g, j) => j === i ? { ...g, active: !g.active } : g));
-  const remove       = i => onChange(goals.filter((_, j) => j !== i));
+  const remove       = i => { if (window.confirm("Delete this goal?")) onChange(goals.filter((_, j) => j !== i)); };
   const setText      = (i, v) => onChange(goals.map((g, j) => j === i ? { ...g, text: v } : g));
 
   const ghostGoal = dragging !== null ? goals[dragging] : null;
@@ -978,19 +972,21 @@ function GoalList({ goals, onChange }) {
               color: g.active ? "var(--text)" : "var(--text3)",
             },
           }),
-          React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 } },
+          React.createElement("div", { style: { display: "flex", flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 0 } },
             React.createElement("button", {
               onClick: () => toggleActive(i),
               style: {
-                fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 20, whiteSpace: "nowrap",
+                fontSize: 13, fontWeight: 600, padding: "8px 14px", borderRadius: 20, whiteSpace: "nowrap",
+                minHeight: 40, minWidth: 72,
                 background: g.active ? "var(--accent-light)" : "var(--surface2)",
                 color:      g.active ? "var(--accent-text)"  : "var(--text3)",
-                border: "none", cursor: "pointer",
+                border: g.active ? "1.5px solid var(--accent)" : "1.5px solid var(--border)",
+                cursor: "pointer",
               }
             }, g.active ? "Active" : "Hidden"),
             React.createElement("button", {
               onClick: () => remove(i),
-              style: { background: "none", border: "none", cursor: "pointer", color: "var(--text3)", fontSize: 16, lineHeight: 1, padding: "2px", textAlign: "center" }
+              style: { background: "none", border: "none", cursor: "pointer", color: "#dc2626", fontSize: 20, lineHeight: 1, padding: "4px 6px", textAlign: "center" }
             }, "×")
           )
         );
@@ -1535,7 +1531,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.6"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.7"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
