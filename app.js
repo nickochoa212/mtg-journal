@@ -467,17 +467,23 @@ function ChartsSection({ entries, goals }) {
     return { goal, pct };
   }); // order follows settings, no sort
 
-  const recentWR = rollingWR ? `${Math.round(rollingWR[rollingWR.length - 1] * 100)}% recent` : null;
+  const recentWR    = rollingWR    ? `${Math.round(rollingWR[rollingWR.length - 1] * 100)}% recent` : null;
   const recentGoals = rollingGoals ? `${Math.round(rollingGoals[rollingGoals.length - 1] * activeGoals.length * 10) / 10} / ${activeGoals.length} recent` : null;
+  const need        = Math.max(0, WINDOW - sorted.length);
+  const notEnough   = React.createElement("div", {
+    style: { height: 56, display: "flex", alignItems: "center", justifyContent: "center" }
+  }, React.createElement("span", { style: { fontSize: 12, color: "var(--text3)" } },
+    `${need} more entr${need === 1 ? "y" : "ies"} needed`
+  ));
 
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 4 } },
 
-    rollingGoals && React.createElement(ChartCard, { title: "Goals per match", subtitle: `10-match rolling • ${recentGoals}` },
-      React.createElement(Sparkline, { data: rollingGoals })
+    React.createElement(ChartCard, { title: "Goals per match", subtitle: recentGoals ? `10-match rolling • ${recentGoals}` : null },
+      rollingGoals ? React.createElement(Sparkline, { data: rollingGoals }) : notEnough
     ),
 
-    rollingWR && React.createElement(ChartCard, { title: "Win rate trend", subtitle: `10-match rolling • ${recentWR}` },
-      React.createElement(Sparkline, { data: rollingWR, stroke: "#059669" })
+    React.createElement(ChartCard, { title: "Win rate trend", subtitle: recentWR ? `10-match rolling • ${recentWR}` : null },
+      rollingWR ? React.createElement(Sparkline, { data: rollingWR, stroke: "#059669" }) : notEnough
     ),
 
     heatmap.length > 0 && React.createElement(ChartCard, { title: "Goal achievement", subtitle: `${entries.length} match${entries.length !== 1 ? "es" : ""}` },
@@ -1743,7 +1749,7 @@ function App({ uid, user }) {
   useEffect(() => {
     const handler = () => {
       if      (view === "log")    setView("tabs");
-      else if (view === "edit")   setView("detail");
+      else if (view === "edit")   { setSelected(null); setView("tabs"); }
       else if (view === "detail") { setSelected(null); setView("tabs"); }
     };
     window.addEventListener("popstate", handler);
@@ -1852,8 +1858,8 @@ function App({ uid, user }) {
     setError(null);
     const updated = { ...form, id: selected.id };
     setAndCache(entries.map(e => e.id === selected.id ? updated : e));
-    setSelected(updated);
-    setView("detail");
+    setSelected(null);
+    setView("tabs");
     firestoreUpsert(uid, updated).catch(() => {
       setError("Saved locally but Firestore sync failed.");
     });
@@ -1916,7 +1922,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.17"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.18"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
@@ -1930,7 +1936,7 @@ function App({ uid, user }) {
               React.createElement(DailyTab, {
                 entries, goals, date: dailyDate, settings,
                 isActive: tab === "Daily",
-                onOpen: entry => { setSelected(entry); setView("detail"); },
+                onOpen: entry => { setSelected(entry); setView("edit"); },
                 onSave: saveNew,
                 onFormatChange: handleFormatChange,
               })
@@ -1938,7 +1944,7 @@ function App({ uid, user }) {
             React.createElement(ScrollPanel, { style: { minWidth: "100%", width: "100%", height: "100%", padding: "0 8px env(safe-area-inset-bottom, 16px)" } },
               React.createElement(HistoryTab, {
                 entries, goals, formats,
-                onOpen: entry => { setSelected(entry); setView("detail"); },
+                onOpen: entry => { setSelected(entry); setView("edit"); },
               })
             ),
             React.createElement(ScrollPanel, { style: { minWidth: "100%", width: "100%", height: "100%", padding: "0 8px env(safe-area-inset-bottom, 16px)" } },
@@ -1969,12 +1975,17 @@ function App({ uid, user }) {
 
     // ── Edit entry ──
     view === "edit" && selected && React.createElement("div", { style: { flex: 1, overflowY: "auto", minHeight: 0, padding: "0 0 env(safe-area-inset-bottom, 16px)" } },
-      React.createElement("div", { style: { marginBottom: 20 } },
-        React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "Edit entry")
+      React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
+        React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "Edit entry"),
+        React.createElement("button", {
+          className: "btn-danger",
+          onClick: () => { if (window.confirm("Delete this entry?")) deleteEntry(); },
+          style: { fontSize: 13 },
+        }, "Delete")
       ),
       React.createElement(LogForm, {
         initial: selected, settings, isEdit: true, isActive: true,
-        onSave: saveEdit, onCancel: () => setView("detail"),
+        onSave: saveEdit, onCancel: () => { setSelected(null); setView("tabs"); },
         onFormatChange: handleFormatChange,
       }),
       React.createElement("div", { style: { height: 72 } })
