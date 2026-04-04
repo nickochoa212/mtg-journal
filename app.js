@@ -522,9 +522,13 @@ function DailyTab({ entries, goals, date, onOpen, onSave, settings, onFormatChan
 
 // ─── History tab ──────────────────────────────────────────────────────────────
 
-function HistoryTab({ entries, goals, formats, onOpen, onLog }) {
-  const [selectedFormats, setSelectedFormats] = useState([]); // active format filter (multi-select)
-  const [results,         setResults]         = useState([]); // active result filter (multi-select)
+// Date range presets. "custom" reveals the start/end date pickers.
+const DATE_PRESETS = ["All time", "Today", "7 days", "30 days", "Custom"];
+
+function HistoryTab({ entries, goals, formats, onOpen }) {
+  const [selectedFormats, setSelectedFormats] = useState([]);
+  const [results,         setResults]         = useState([]);
+  const [datePreset,      setDatePreset]      = useState("All time");
   const [dateFrom,        setDateFrom]        = useState("");
   const [dateTo,          setDateTo]          = useState("");
 
@@ -533,15 +537,50 @@ function HistoryTab({ entries, goals, formats, onOpen, onLog }) {
   const toggleResult = r => setResults(prev => prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]);
   const toggleFormat = name => setSelectedFormats(prev => prev.includes(name) ? prev.filter(f => f !== name) : [...prev, name]);
 
+  // Derive the effective date bounds from the selected preset
+  const effectiveDateFrom = () => {
+    if (datePreset === "Today")   return todayStr();
+    if (datePreset === "7 days")  return offsetDate(todayStr(), -6);
+    if (datePreset === "30 days") return offsetDate(todayStr(), -29);
+    if (datePreset === "Custom")  return dateFrom;
+    return ""; // All time
+  };
+  const effectiveDateTo = () => {
+    if (datePreset === "Today")  return todayStr();
+    if (datePreset === "7 days" || datePreset === "30 days") return todayStr();
+    if (datePreset === "Custom") return dateTo;
+    return "";
+  };
+
+  const from = effectiveDateFrom();
+  const to   = effectiveDateTo();
+
   const filtered = entries.filter(e => {
     if (selectedFormats.length && !selectedFormats.includes(e.format)) return false;
     if (results.length         && !results.includes(e.result))         return false;
-    if (dateFrom && e.date < dateFrom) return false;
-    if (dateTo   && e.date > dateTo)   return false;
+    if (from && e.date < from) return false;
+    if (to   && e.date > to)   return false;
     return true;
   }).sort((a, b) => b.date < a.date ? -1 : b.date > a.date ? 1 : b.id - a.id);
 
-  const hasFilters = selectedFormats.length || results.length || dateFrom || dateTo;
+  const hasFilters = selectedFormats.length || results.length || datePreset !== "All time";
+
+  const clearFilters = () => {
+    setSelectedFormats([]); setResults([]);
+    setDatePreset("All time"); setDateFrom(""); setDateTo("");
+  };
+
+  // Shared pill style used by all three filter rows
+  const pill = (label, active, onClick, colorStyle) => React.createElement("button", {
+    key: label, onClick,
+    style: {
+      padding: "5px 12px", borderRadius: 20, fontSize: 13, fontWeight: 500,
+      cursor: "pointer", transition: "all 0.12s",
+      ...(active
+        ? (colorStyle || { background: "var(--accent-light)", color: "var(--accent-text)", border: "1.5px solid var(--accent)" })
+        : { background: "var(--surface)", color: "var(--text2)", border: "1px solid var(--border)" }),
+    }
+  }, label);
 
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 12 } },
 
@@ -549,20 +588,7 @@ function HistoryTab({ entries, goals, formats, onOpen, onLog }) {
     React.createElement("div", null,
       React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 } }, "Format"),
       React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
-        activeNames.map(name => {
-          const sel = selectedFormats.includes(name);
-          return React.createElement("button", {
-            key: name,
-            onClick: () => toggleFormat(name),
-            style: {
-              padding: "5px 12px", borderRadius: 20, fontSize: 13, fontWeight: 500, cursor: "pointer",
-              background: sel ? "var(--accent-light)" : "var(--surface)",
-              color:      sel ? "var(--accent-text)"  : "var(--text2)",
-              border:     sel ? "1.5px solid var(--accent)" : "1px solid var(--border)",
-              transition: "all 0.12s",
-            }
-          }, name);
-        })
+        activeNames.map(name => pill(name, selectedFormats.includes(name), () => toggleFormat(name)))
       )
     ),
 
@@ -573,14 +599,9 @@ function HistoryTab({ entries, goals, formats, onOpen, onLog }) {
         ["Win", "Lose", "Draw"].map(r => {
           const sel = results.includes(r);
           const s   = RESULT_STYLE[r];
-          const style = sel
-            ? { background: s.background, color: s.color, border: `1.5px solid ${s.border}` }
-            : { background: "var(--surface)", color: "var(--text2)", border: "1px solid var(--border)" };
-          return React.createElement("button", {
-            key: r,
-            onClick: () => toggleResult(r),
-            style: { padding: "5px 16px", borderRadius: 20, fontSize: 13, fontWeight: 500, cursor: "pointer", transition: "all 0.12s", ...style }
-          }, r);
+          return pill(r, sel, () => toggleResult(r),
+            sel ? { background: s.background, color: s.color, border: `1.5px solid ${s.border}` } : null
+          );
         })
       )
     ),
@@ -588,7 +609,11 @@ function HistoryTab({ entries, goals, formats, onOpen, onLog }) {
     // Date range filter
     React.createElement("div", null,
       React.createElement("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 } }, "Date range"),
-      React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+      React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
+        DATE_PRESETS.map(p => pill(p, datePreset === p, () => setDatePreset(p)))
+      ),
+      // Custom date pickers — only shown when Custom is selected
+      datePreset === "Custom" && React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", marginTop: 8 } },
         React.createElement("div", { style: { position: "relative", flex: 1 } },
           React.createElement("input", {
             type: "date", value: dateFrom,
@@ -608,16 +633,21 @@ function HistoryTab({ entries, goals, formats, onOpen, onLog }) {
           !dateTo && React.createElement("span", {
             style: { position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: "var(--text3)", pointerEvents: "none" }
           }, "End")
-        ),
-        hasFilters && React.createElement("button", {
-          onClick: () => { setSelectedFormats([]); setResults([]); setDateFrom(""); setDateTo(""); },
-          style: { fontSize: 12, padding: "5px 10px", color: "var(--text2)", background: "none", border: "none", cursor: "pointer", whiteSpace: "nowrap" }
-        }, "Clear")
+        )
       )
     ),
 
+    // Clear filters — full-width row, only shown when any filter is active
+    hasFilters && React.createElement("button", {
+      onClick: clearFilters,
+      style: {
+        width: "100%", padding: "8px", fontSize: 13, color: "var(--text2)",
+        background: "none", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)",
+        cursor: "pointer",
+      }
+    }, "Clear filters"),
+
     React.createElement(StatsBar, { entries: filtered, goalCount: goals.length }),
-    React.createElement(LogMatchButton, { onClick: onLog }),
     React.createElement(EntryList, { entries: filtered, onOpen }),
   );
 }
@@ -1345,7 +1375,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.1"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.2"),
         ),
         tab === "Daily" && React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
@@ -1367,7 +1397,6 @@ function App({ uid, user }) {
               React.createElement(HistoryTab, {
                 entries, goals, formats,
                 onOpen: entry => { setSelected(entry); setView("detail"); },
-                onLog:  () => setView("log"),
               })
             ),
             React.createElement("div", { style: { minWidth: "100%", width: "100%", padding: "0 8px" } },
