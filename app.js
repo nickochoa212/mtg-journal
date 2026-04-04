@@ -18,12 +18,15 @@ const { useState, useEffect, useRef } = React;
 // ─── Default data ─────────────────────────────────────────────────────────────
 
 const DEFAULT_GOALS = [
-  "Don't let emotions take over. Focus on the game and optimizing my outs.",
-  "Be calm and collected throughout the entire match",
-  "Acknowledge bad luck and move on",
-  "Be gracious to opponent",
-  "At end of game, think about decisions I could have done differently",
+  { id: "g01", text: "Don't let emotions take over. Focus on the game and optimizing my outs.", active: true },
+  { id: "g02", text: "Be calm and collected throughout the entire match",                       active: true },
+  { id: "g03", text: "Acknowledge bad luck and move on",                                       active: true },
+  { id: "g04", text: "Be gracious to opponent",                                                active: true },
+  { id: "g05", text: "At end of game, think about decisions I could have done differently",    active: true },
 ];
+
+/** Generates a unique ID for a new goal. */
+function goalId() { return "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 
 const DEFAULT_FORMATS = [
   { name: "Duel Commander", active: true },
@@ -296,7 +299,7 @@ function StatsBar({ entries, goalCount }) {
   const wins   = entries.filter(e => e.result === "Win").length;
   const losses = entries.filter(e => e.result === "Lose").length;
   const draws  = entries.filter(e => e.result === "Draw").length;
-  const avg    = (entries.reduce((s, e) => s + e.goals.filter(Boolean).length, 0) / entries.length).toFixed(1);
+  const avg    = (entries.reduce((s, e) => s + Object.values(e.goals && !Array.isArray(e.goals) ? e.goals : {}).filter(Boolean).length, 0) / entries.length).toFixed(1);
   return React.createElement("div", { className: "stats-grid" },
     [
       { label: "Matches",   val: entries.length },
@@ -324,7 +327,9 @@ function LogMatchButton({ onClick }) {
 // ─── Entry card ───────────────────────────────────────────────────────────────
 
 function EntryCard({ entry, onOpen }) {
-  const score = entry.goals.filter(Boolean).length;
+  const entryGoals = entry.goals && !Array.isArray(entry.goals) ? entry.goals : {};
+  const score = Object.values(entryGoals).filter(Boolean).length;
+  const total = Object.keys(entryGoals).length;
   // Show "Win - 2/1" for entries with wins/losses data; plain badge for legacy entries.
   const hasScore = entry.wins != null && entry.losses != null;
   const resultLabel = hasScore ? `${entry.result} — ${entry.wins}/${entry.losses}` : entry.result;
@@ -339,8 +344,8 @@ function EntryCard({ entry, onOpen }) {
         React.createElement("span", { style: { fontSize: 12, color: "var(--text2)", marginLeft: "auto" } }, fmtDateLong(entry.date))
       ),
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
-        React.createElement(ScorePips, { checked: score, total: entry.goals.length }),
-        React.createElement("span", { style: { fontSize: 12, color: "var(--text2)" } }, `${score}/${entry.goals.length} goals`),
+        React.createElement(ScorePips, { checked: score, total }),
+        React.createElement("span", { style: { fontSize: 12, color: "var(--text2)" } }, `${score}/${total} goals`),
         entry.notes && React.createElement("span", {
           style: { fontSize: 12, color: "var(--text3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 150 }
         }, `— ${entry.notes}`)
@@ -866,6 +871,134 @@ function FormatList({ formats, onChange, onRename }) {
   );
 }
 
+// ─── Goal list ────────────────────────────────────────────────────────────────
+// Draggable, editable list of goal objects { id, text, active }.
+// Modeled after FormatList — same portal pattern for drag ghost.
+
+const GOAL_ROW_H = 82; // approximate px per row — used for shift animation
+
+function GoalList({ goals, onChange }) {
+  const [dragging, setDragging] = useState(null);
+  const [dragY,    setDragY]    = useState(0);
+  const [overIdx,  setOverIdx]  = useState(null);
+  const listRef    = useRef(null);
+  const draggingRef = useRef(null);
+  const overIdxRef  = useRef(null);
+
+  useEffect(() => { draggingRef.current = dragging; }, [dragging]);
+  useEffect(() => { overIdxRef.current  = overIdx;  }, [overIdx]);
+
+  const getOverIdx = clientY => {
+    if (!listRef.current) return 0;
+    const rows = [...listRef.current.querySelectorAll("[data-goal-row]")];
+    for (let i = 0; i < rows.length; i++) {
+      const rect = rows[i].getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) return i;
+    }
+    return rows.length - 1;
+  };
+
+  const startDrag = (clientY, i) => { setDragging(i); setDragY(clientY); setOverIdx(i); };
+  const moveDrag  = clientY => { if (draggingRef.current === null) return; setDragY(clientY); setOverIdx(getOverIdx(clientY)); };
+  const endDrag   = () => {
+    const from = draggingRef.current, to = overIdxRef.current;
+    if (from !== null && to !== null && from !== to) {
+      const arr = [...goals];
+      const [item] = arr.splice(from, 1);
+      arr.splice(to, 0, item);
+      onChange(arr);
+    }
+    setDragging(null); setOverIdx(null);
+  };
+
+  const getShift = i => {
+    if (dragging === null || overIdx === null || i === dragging) return 0;
+    if (dragging < overIdx) { if (i > dragging && i <= overIdx) return -GOAL_ROW_H; }
+    else                    { if (i >= overIdx && i < dragging) return GOAL_ROW_H; }
+    return 0;
+  };
+
+  const toggleActive = i => onChange(goals.map((g, j) => j === i ? { ...g, active: !g.active } : g));
+  const remove       = i => onChange(goals.filter((_, j) => j !== i));
+  const setText      = (i, v) => onChange(goals.map((g, j) => j === i ? { ...g, text: v } : g));
+
+  const ghostGoal = dragging !== null ? goals[dragging] : null;
+
+  return React.createElement("div", { style: { position: "relative" } },
+
+    ghostGoal && ReactDOM.createPortal(React.createElement("div", {
+      style: {
+        position: "fixed", left: "50%", top: dragY - GOAL_ROW_H / 2,
+        transform: "translateX(-50%)", zIndex: 1000,
+        width: listRef.current ? listRef.current.offsetWidth : 280,
+        background: "var(--surface)", border: "2px solid var(--accent)",
+        borderRadius: "var(--radius-sm)", padding: "10px 12px",
+        display: "flex", alignItems: "flex-start", gap: 10,
+        boxShadow: "0 12px 32px rgba(0,0,0,0.22)", pointerEvents: "none", opacity: 0.97,
+      }
+    },
+      React.createElement("span", { style: { fontSize: 18, color: "var(--accent-text)", flexShrink: 0, lineHeight: 1.4 } }, "⠿"),
+      React.createElement("span", { style: { flex: 1, fontSize: 13, color: "var(--text)", lineHeight: 1.5 } }, ghostGoal.text || React.createElement("em", null, "empty"))
+    ), document.body),
+
+    React.createElement("div", {
+      ref: listRef,
+      style: { display: "flex", flexDirection: "column", gap: 6 },
+      onMouseMove: e => moveDrag(e.clientY),
+      onMouseUp: endDrag,
+      onMouseLeave: dragging !== null ? endDrag : undefined,
+    },
+      goals.map((g, i) => {
+        const isDragged = dragging === i;
+        return React.createElement("div", {
+          key: g.id,
+          "data-goal-row": true,
+          style: {
+            background: "var(--surface)", border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm)", padding: "8px 10px",
+            display: "flex", alignItems: "flex-start", gap: 8,
+            opacity: isDragged ? 0 : 1,
+            transform: `translateY(${getShift(i)}px)`,
+            transition: isDragged ? "opacity 0.1s" : "transform 0.18s cubic-bezier(0.25,0.46,0.45,0.94), opacity 0.1s",
+            userSelect: "none", willChange: "transform",
+          }
+        },
+          React.createElement("span", {
+            style: { fontSize: 18, color: "var(--text3)", cursor: "grab", flexShrink: 0, lineHeight: 1.6, touchAction: "none" },
+            onMouseDown:  e => { e.preventDefault(); startDrag(e.clientY, i); },
+            onTouchStart: e => { e.preventDefault(); e.stopPropagation(); startDrag(e.touches[0].clientY, i); },
+            onTouchMove:  e => { e.preventDefault(); e.stopPropagation(); moveDrag(e.touches[0].clientY); },
+            onTouchEnd:   e => { e.stopPropagation(); endDrag(); },
+          }, "⠿"),
+          React.createElement("textarea", {
+            value: g.text, rows: 2,
+            onChange: e => setText(i, e.target.value),
+            style: {
+              flex: 1, fontSize: 13, resize: "vertical", userSelect: "text",
+              color: g.active ? "var(--text)" : "var(--text3)",
+            },
+          }),
+          React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 } },
+            React.createElement("button", {
+              onClick: () => toggleActive(i),
+              style: {
+                fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 20, whiteSpace: "nowrap",
+                background: g.active ? "var(--accent-light)" : "var(--surface2)",
+                color:      g.active ? "var(--accent-text)"  : "var(--text3)",
+                border: "none", cursor: "pointer",
+              }
+            }, g.active ? "Active" : "Hidden"),
+            React.createElement("button", {
+              onClick: () => remove(i),
+              style: { background: "none", border: "none", cursor: "pointer", color: "var(--text3)", fontSize: 16, lineHeight: 1, padding: "2px", textAlign: "center" }
+            }, "×")
+          )
+        );
+      })
+    )
+  );
+}
+
 // ─── Settings tab ─────────────────────────────────────────────────────────────
 
 function SettingsTab({ settings, onSave, onFormatRename, lastSynced, uid, user }) {
@@ -896,7 +1029,7 @@ function SettingsTab({ settings, onSave, onFormatRename, lastSynced, uid, user }
     }
   };
 
-  const setGoal = (i, v) => setGoals(goals.map((g, j) => j === i ? v : g));
+  const addGoal = () => setGoals([...goals, { id: goalId(), text: "", active: true }]);
 
 
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 28 } },
@@ -924,22 +1057,17 @@ function SettingsTab({ settings, onSave, onFormatRename, lastSynced, uid, user }
 
     React.createElement("div", null,
       React.createElement(SectionLabel, null, "Mental game goals"),
-      React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } },
-        goals.map((g, i) =>
-          React.createElement("div", { key: i, style: { display: "flex", alignItems: "flex-start", gap: 8 } },
-            React.createElement("span", { style: { fontSize: 13, color: "var(--text2)", fontWeight: 600, minWidth: 20, paddingTop: 10 } }, `${i+1}.`),
-            React.createElement("textarea", {
-              value: g, rows: 2,
-              onChange: e => setGoal(i, e.target.value),
-              style: { flex: 1, fontSize: 13, resize: "vertical" },
-            })
-          )
-        )
+      React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginBottom: 10 } },
+        "Drag ⠿ to reorder • edit text inline • toggle Active/Hidden"
       ),
-      React.createElement("button", {
-        onClick: () => { if (window.confirm("Reset goals to defaults?")) setGoals(DEFAULT_GOALS); },
-        style: { marginTop: 8, fontSize: 12, color: "var(--text3)", background: "none", border: "none", cursor: "pointer", padding: "4px 0" }
-      }, "Reset to defaults")
+      React.createElement(GoalList, { goals, onChange: setGoals }),
+      React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 10 } },
+        React.createElement("button", { className: "btn-primary", onClick: addGoal }, "+ Add goal"),
+        React.createElement("button", {
+          onClick: () => { if (window.confirm("Reset goals to defaults?")) setGoals(DEFAULT_GOALS); },
+          style: { fontSize: 12, color: "var(--text3)", background: "none", border: "none", cursor: "pointer", padding: "4px 0" }
+        }, "Reset to defaults")
+      )
     ),
 
     React.createElement("div", null,
@@ -1004,7 +1132,7 @@ function SettingsTab({ settings, onSave, onFormatRename, lastSynced, uid, user }
  */
 function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onFormatChange, isActive = true }) {
   const activeFormats = settings.formats.filter(f => f.active).map(f => f.name);
-  const goals = settings.goals;
+  const activeGoals   = settings.goals.filter(g => g.active);
 
   // Pick default format: existing format when editing, else last-used if still
   // active, else first active format.
@@ -1012,9 +1140,12 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onF
     ? initial.format
     : (activeFormats.includes(settings.lastFormat) ? settings.lastFormat : activeFormats[0] || "");
 
-  // Normalize saved goal booleans to match the current goals list length.
-  const normalizeGoals = (saved, count) =>
-    [...saved, ...Array(Math.max(0, count - saved.length)).fill(false)].slice(0, count);
+  // Build initial goals map from active goals, seeding from any saved values.
+  const initGoalsMap = () => {
+    const map = {};
+    activeGoals.forEach(g => { map[g.id] = initial?.goals?.[g.id] ?? false; });
+    return map;
+  };
 
   // For legacy entries (no wins/losses stored), infer sensible defaults from
   // the stored result so the calculated result matches after editing.
@@ -1028,20 +1159,15 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onF
     : 1;
 
   const [form, setForm] = useState(initial
-    ? { ...initial, goals: normalizeGoals(initial.goals, goals.length), wins: defaultWins, losses: defaultLosses }
-    : { date: defaultDate || todayStr(), format: defaultFormat, notes: "", goals: Array(goals.length).fill(false), wins: 0, losses: 0 }
+    ? { ...initial, goals: initGoalsMap(), wins: defaultWins, losses: defaultLosses }
+    : { date: defaultDate || todayStr(), format: defaultFormat, notes: "", goals: initGoalsMap(), wins: 0, losses: 0 }
   );
   const [validationError, setValidationError] = useState("");
 
   const result = calcResult(form.wins, form.losses);
 
-  const toggle = i => {
-    // Use functional form to avoid reading stale form.goals from closure
-    setForm(f => {
-      const g = [...f.goals];
-      g[i] = !g[i];
-      return { ...f, goals: g };
-    });
+  const toggle = id => {
+    setForm(f => ({ ...f, goals: { ...f.goals, [id]: !f.goals[id] } }));
   };
 
   const set = (k, v) => {
@@ -1051,7 +1177,7 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onF
     if (k === "date") setValidationError("");
   };
 
-  const score = form.goals.filter(Boolean).length;
+  const score = Object.values(form.goals).filter(Boolean).length;
 
   const handleSave = () => {
     if (!form.date) { setValidationError("Please select a date."); return; }
@@ -1136,23 +1262,23 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onF
     React.createElement("div", { className: "goals-box" },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 } },
         React.createElement("span", { style: { fontWeight: 600, fontSize: 14, color: "var(--text)" } }, "Mental game goals"),
-        React.createElement("span", { style: { fontSize: 12, color: "var(--text2)" } }, `${score}/${goals.length}`)
+        React.createElement("span", { style: { fontSize: 12, color: "var(--text2)" } }, `${score}/${activeGoals.length}`)
       ),
-      goals.map((g, i) =>
+      activeGoals.map(g =>
         React.createElement("label", {
-          key: i, className: "goal-row",
-          onClick: () => toggle(i),
+          key: g.id, className: "goal-row",
+          onClick: () => toggle(g.id),
         },
           React.createElement("span", {
-            className: `checkbox ${form.goals[i] ? "checked" : ""}`,
+            className: `checkbox ${form.goals[g.id] ? "checked" : ""}`,
           },
-            form.goals[i] && React.createElement("svg", { width: 10, height: 8, viewBox: "0 0 10 8", fill: "none" },
+            form.goals[g.id] && React.createElement("svg", { width: 10, height: 8, viewBox: "0 0 10 8", fill: "none" },
               React.createElement("path", { d: "M1 4l3 3 5-6", stroke: "#fff", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" })
             )
           ),
           React.createElement("span", {
-            style: { fontSize: 14, lineHeight: 1.5, color: form.goals[i] ? "var(--text)" : "var(--text2)" },
-          }, g)
+            style: { fontSize: 14, lineHeight: 1.5, color: form.goals[g.id] ? "var(--text)" : "var(--text2)" },
+          }, g.text)
         )
       )
     ),
@@ -1199,14 +1325,13 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onF
 // ─── Detail view ──────────────────────────────────────────────────────────────
 
 function DetailView({ entry, goals, onEdit, onDelete, onBack }) {
-  const score = entry.goals.filter(Boolean).length;
-  // If the current goals list length doesn't match the entry's saved goals, fall
-  // back to DEFAULT_GOALS labels so the checkmarks still display with some text.
-  // This can happen if goals were added or removed in Settings after the entry
-  // was logged. The goal boolean values (checked/unchecked) are always correct.
-  const displayGoals = goals.length === entry.goals.length ? goals : DEFAULT_GOALS;
+  const entryGoals = entry.goals && !Array.isArray(entry.goals) ? entry.goals : {};
+  const score = Object.values(entryGoals).filter(Boolean).length;
+  const total = Object.keys(entryGoals).length;
   const hasScore = entry.wins != null && entry.losses != null;
   const s = RESULT_STYLE[entry.result] || { background: "var(--surface2)", color: "var(--text2)" };
+  // Show goals that exist in current settings; fall back to all entry goal IDs if none match.
+  const displayGoals = goals.filter(g => g.id in entryGoals);
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
     React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
       React.createElement("button", { className: "btn-ghost", onClick: onBack, style: { fontSize: 13 } }, "‹ Back"),
@@ -1218,11 +1343,11 @@ function DetailView({ entry, goals, onEdit, onDelete, onBack }) {
     React.createElement("div", { className: "goals-box" },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 12 } },
         React.createElement("span", { style: { fontWeight: 600, fontSize: 14, color: "var(--text)" } }, "Mental game goals"),
-        React.createElement("span", { style: { fontSize: 12, color: "var(--text2)" } }, `${score}/${entry.goals.length}`)
+        React.createElement("span", { style: { fontSize: 12, color: "var(--text2)" } }, `${score}/${total}`)
       ),
-      displayGoals.map((g, i) =>
-        React.createElement("div", { key: i, style: { display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10 } },
-          entry.goals[i]
+      displayGoals.map(g =>
+        React.createElement("div", { key: g.id, style: { display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10 } },
+          entryGoals[g.id]
             ? React.createElement("svg", { width: 18, height: 18, viewBox: "0 0 18 18", style: { flexShrink: 0, marginTop: 2 } },
                 React.createElement("circle", { cx: 9, cy: 9, r: 9, fill: "#059669" }),
                 React.createElement("path", { d: "M5 9l3 3 5-5", stroke: "#fff", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", fill: "none" })
@@ -1230,7 +1355,7 @@ function DetailView({ entry, goals, onEdit, onDelete, onBack }) {
             : React.createElement("svg", { width: 18, height: 18, viewBox: "0 0 18 18", style: { flexShrink: 0, marginTop: 2 } },
                 React.createElement("circle", { cx: 9, cy: 9, r: 8.5, fill: "none", stroke: "var(--border2)", strokeWidth: 1 })
               ),
-          React.createElement("span", { style: { fontSize: 14, color: entry.goals[i] ? "var(--text)" : "var(--text3)", lineHeight: 1.5 } }, g)
+          React.createElement("span", { style: { fontSize: 14, color: entryGoals[g.id] ? "var(--text)" : "var(--text3)", lineHeight: 1.5 } }, g.text)
         )
       )
     ),
@@ -1410,7 +1535,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.4"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.5"),
         ),
         tab === "Daily" && React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
