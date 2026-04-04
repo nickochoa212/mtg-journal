@@ -490,13 +490,33 @@ function DateNav({ date, onChange }) {
 }
 
 // ─── Daily tab ────────────────────────────────────────────────────────────────
+// The log form is always visible inline. After each save, formKey increments
+// which remounts LogForm with fresh state. Changing the date also resets the
+// form so the default date stays in sync with the day navigator.
 
-function DailyTab({ entries, goals, date, onOpen, onLog }) {
+function DailyTab({ entries, goals, date, onOpen, onSave, settings, onFormatChange }) {
+  const [formKey, setFormKey] = useState(0);
   const dayEntries = entries.filter(e => e.date === date).sort((a, b) => b.id - a.id);
+
+  const handleSave = form => {
+    onSave(form);
+    setFormKey(k => k + 1);
+  };
+
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
     React.createElement(StatsBar, { entries: dayEntries, goalCount: goals.length }),
-    React.createElement(LogMatchButton, { onClick: onLog }),
-    React.createElement(EntryList, { entries: dayEntries, onOpen }),
+    React.createElement(LogForm, {
+      key: `${formKey}-${date}`,
+      settings,
+      defaultDate: date,
+      onSave: handleSave,
+      onFormatChange,
+    }),
+    dayEntries.length > 0 && React.createElement("div", {
+      style: { borderTop: "1px solid var(--border)", paddingTop: 16 }
+    },
+      React.createElement(EntryList, { entries: dayEntries, onOpen })
+    ),
   );
 }
 
@@ -1100,10 +1120,10 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onF
           validationError && React.createElement("span", {
             style: { flex: 1, fontSize: 13, color: "#dc2626" }
           }, validationError),
-          React.createElement("button", { className: "btn-ghost", onClick: onCancel, style: { flex: validationError ? "none" : 1 } }, "Cancel"),
+          onCancel && React.createElement("button", { className: "btn-ghost", onClick: onCancel, style: { flex: validationError ? "none" : 1 } }, "Cancel"),
           React.createElement("button", {
             className: "btn-primary", onClick: handleSave,
-            style: { flex: 2 },
+            style: { flex: onCancel ? 2 : 1 },
           }, isEdit ? "Save changes" : "Log entry")
         )
       ),
@@ -1325,7 +1345,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.0"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.1"),
         ),
         tab === "Daily" && React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
@@ -1337,9 +1357,10 @@ function App({ uid, user }) {
         : React.createElement(TabSlider, { tab, setTab: changeTab, setDailyDate },
             React.createElement("div", { style: { minWidth: "100%", width: "100%", padding: "0 8px" } },
               React.createElement(DailyTab, {
-                entries, goals, date: dailyDate,
+                entries, goals, date: dailyDate, settings,
                 onOpen: entry => { setSelected(entry); setView("detail"); },
-                onLog:  () => setView("log"),
+                onSave: saveNew,
+                onFormatChange: handleFormatChange,
               })
             ),
             React.createElement("div", { style: { minWidth: "100%", width: "100%", padding: "0 8px" } },
@@ -1362,18 +1383,6 @@ function App({ uid, user }) {
           )
     ),
 
-    // ── Log new entry ──
-    view === "log" && React.createElement(React.Fragment, null,
-      React.createElement("div", { style: { marginBottom: 20 } },
-        React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "Log a match"),
-        React.createElement("p",  { style: { margin: 0 } }, "How did you play today?")
-      ),
-      React.createElement(LogForm, {
-        settings, defaultDate: dailyDate,
-        onSave: saveNew, onCancel: () => setView("tabs"),
-        onFormatChange: handleFormatChange,
-      })
-    ),
 
     // ── Entry detail ──
     view === "detail" && selected && React.createElement(DetailView, {
