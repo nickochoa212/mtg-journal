@@ -54,6 +54,9 @@ const ACCENT_OPTIONS = [
   { key: "green",  label: "Green",  color: "#3B6D11" },
   { key: "coral",  label: "Coral",  color: "#993C1D" },
   { key: "pink",   label: "Pink",   color: "#993556" },
+  { key: "indigo", label: "Indigo", color: "#5B21B6" },
+  { key: "amber",  label: "Amber",  color: "#D97706" },
+  { key: "red",    label: "Red",    color: "#DC2626" },
 ];
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -171,6 +174,11 @@ function applyTheme(accent, darkMode) {
   if (darkMode === "dark")  body.classList.add("theme-dark");
   ACCENT_OPTIONS.forEach(a => body.classList.remove(`accent-${a.key}`));
   body.classList.add(`accent-${accent}`);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) {
+    const option = ACCENT_OPTIONS.find(a => a.key === accent) || ACCENT_OPTIONS[0];
+    meta.setAttribute("content", option.color);
+  }
 }
 
 // ─── Local cache ──────────────────────────────────────────────────────────────
@@ -488,6 +496,120 @@ function TabSlider({ tab, setTab, setDailyDate, indicatorRef, children }) {
   );
 }
 
+// ─── Scroll panel ─────────────────────────────────────────────────────────────
+// Wraps a scrollable tab panel with pull-to-refresh and bottom-overscroll bounce.
+// PTR: drag down at top ≥ 64px → location.reload().
+// Bounce: at bottom, try to scroll further → brief spring animation on content.
+
+function ScrollPanel({ children, style }) {
+  const elRef    = useRef(null);
+  const innerRef = useRef(null);
+  const ptrRef   = useRef(null);
+
+  useEffect(() => {
+    const el    = elRef.current;
+    const inner = innerRef.current;
+    const ptr   = ptrRef.current;
+    if (!el || !inner || !ptr) return;
+
+    const PTR_THRESHOLD = 64;
+    let startX = 0, startY = 0, startTop = 0, mode = null, pullY = 0;
+    let lastScrollTop = 0, hitBottom = false;
+
+    const onTouchStart = e => {
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      startTop = el.scrollTop;
+      lastScrollTop = el.scrollTop;
+      mode = null; pullY = 0; hitBottom = false;
+    };
+
+    const onTouchMove = e => {
+      const dy  = e.touches[0].clientY - startY;
+      const adx = Math.abs(e.touches[0].clientX - startX);
+
+      // Determine mode on first decisive move
+      if (mode === null && (Math.abs(dy) > 8 || adx > 8)) {
+        const ptrCandidate = startTop === 0 && dy > 0 && Math.abs(dy) >= adx;
+        mode = ptrCandidate ? 'ptr' : 'scroll';
+      }
+
+      if (mode === 'ptr') {
+        e.preventDefault();
+        pullY = Math.min(dy * 0.45, 80);
+        inner.style.transform = `translateY(${pullY}px)`;
+        ptr.style.transform   = `translateY(${pullY - 44}px)`;
+        ptr.style.opacity     = String(Math.min(pullY / PTR_THRESHOLD, 1));
+        ptr.textContent       = pullY >= PTR_THRESHOLD ? '↑ Release to refresh' : '↓ Pull to refresh';
+        return;
+      }
+
+      // Track overscroll at bottom (scroll stuck but finger still dragging up)
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 2;
+      if (atBottom && el.scrollTop === lastScrollTop && dy < -8) hitBottom = true;
+      lastScrollTop = el.scrollTop;
+    };
+
+    const onTouchEnd = () => {
+      if (mode === 'ptr') {
+        if (pullY >= PTR_THRESHOLD) {
+          ptr.textContent = 'Refreshing…';
+          setTimeout(() => location.reload(), 400);
+        } else {
+          inner.style.transition = 'transform 0.3s cubic-bezier(0.25,0.46,0.45,0.94)';
+          ptr.style.transition   = 'transform 0.3s, opacity 0.3s';
+          inner.style.transform  = '';
+          ptr.style.transform    = 'translateY(-44px)';
+          ptr.style.opacity      = '0';
+          setTimeout(() => { inner.style.transition = ''; ptr.style.transition = ''; }, 300);
+        }
+      } else if (hitBottom && !inner.classList.contains('scroll-bounce')) {
+        inner.classList.add('scroll-bounce');
+        inner.addEventListener('animationend', () => inner.classList.remove('scroll-bounce'), { once: true });
+      }
+      mode = null; pullY = 0; hitBottom = false;
+    };
+
+    // Wheel bounce (desktop/trackpad)
+    const onWheel = e => {
+      if (e.deltaY <= 0) return;
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 2;
+      if (atBottom && !inner.classList.contains('scroll-bounce')) {
+        inner.classList.add('scroll-bounce');
+        inner.addEventListener('animationend', () => inner.classList.remove('scroll-bounce'), { once: true });
+      }
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove',  onTouchMove,  { passive: false });
+    el.addEventListener('touchend',   onTouchEnd,   { passive: true });
+    el.addEventListener('wheel',      onWheel,      { passive: true });
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove',  onTouchMove);
+      el.removeEventListener('touchend',   onTouchEnd);
+      el.removeEventListener('wheel',      onWheel);
+    };
+  }, []);
+
+  return React.createElement("div", {
+    ref: elRef,
+    style: { position: "relative", overflowY: "auto", WebkitOverflowScrolling: "touch", ...style },
+  },
+    React.createElement("div", {
+      ref: ptrRef,
+      style: {
+        position: "absolute", top: 0, left: 0, right: 0, height: 44,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 13, color: "var(--text2)",
+        transform: "translateY(-44px)", opacity: 0,
+        pointerEvents: "none", userSelect: "none", zIndex: 10,
+      }
+    }),
+    React.createElement("div", { ref: innerRef }, children)
+  );
+}
+
 // ─── Compact date nav (header area) ──────────────────────────────────────────
 
 function DateNav({ date, onChange }) {
@@ -508,7 +630,7 @@ function DateNav({ date, onChange }) {
         type: "date",
         value: date,
         max: todayStr(),
-        onChange: e => onChange(e.target.value),
+        onChange: e => { if (e.target.value) onChange(e.target.value); },
         style: {
           position: "absolute", inset: 0, opacity: 0,
           width: "100%", height: "100%", cursor: "pointer",
@@ -986,7 +1108,7 @@ function GoalList({ goals, onChange }) {
               color: g.active ? "var(--text)" : "var(--text3)",
             },
           }),
-          React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 6, flexShrink: 0 } },
+          React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, flexShrink: 0, alignSelf: "center" } },
             React.createElement(ToggleSwitch, { checked: g.active, onChange: () => toggleActive(i) }),
             React.createElement("button", {
               onClick: () => remove(i),
@@ -1533,7 +1655,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.12"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.13"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
@@ -1543,7 +1665,7 @@ function App({ uid, user }) {
       loading
         ? React.createElement(Spinner)
         : React.createElement(TabSlider, { tab, setTab: changeTab, setDailyDate, indicatorRef },
-            React.createElement("div", { style: { minWidth: "100%", width: "100%", height: "100%", overflowY: "auto", WebkitOverflowScrolling: "touch", padding: "0 8px env(safe-area-inset-bottom, 16px)" } },
+            React.createElement(ScrollPanel, { style: { minWidth: "100%", width: "100%", height: "100%", padding: "0 8px env(safe-area-inset-bottom, 16px)" } },
               React.createElement(DailyTab, {
                 entries, goals, date: dailyDate, settings,
                 isActive: tab === "Daily",
@@ -1552,13 +1674,13 @@ function App({ uid, user }) {
                 onFormatChange: handleFormatChange,
               })
             ),
-            React.createElement("div", { style: { minWidth: "100%", width: "100%", height: "100%", overflowY: "auto", WebkitOverflowScrolling: "touch", padding: "0 8px env(safe-area-inset-bottom, 16px)" } },
+            React.createElement(ScrollPanel, { style: { minWidth: "100%", width: "100%", height: "100%", padding: "0 8px env(safe-area-inset-bottom, 16px)" } },
               React.createElement(HistoryTab, {
                 entries, goals, formats,
                 onOpen: entry => { setSelected(entry); setView("detail"); },
               })
             ),
-            React.createElement("div", { style: { minWidth: "100%", width: "100%", height: "100%", overflowY: "auto", WebkitOverflowScrolling: "touch", padding: "0 8px env(safe-area-inset-bottom, 16px)" } },
+            React.createElement(ScrollPanel, { style: { minWidth: "100%", width: "100%", height: "100%", padding: "0 8px env(safe-area-inset-bottom, 16px)" } },
               React.createElement(SettingsTab, {
                 settings,
                 onSave: s => setSettings(s),
