@@ -1922,7 +1922,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.19"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.20"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
@@ -1996,17 +1996,27 @@ function App({ uid, user }) {
 // ─── Root — auth gate ─────────────────────────────────────────────────────────
 // Resolves auth state before rendering anything. Shows a spinner while Firebase
 // checks the session, LoginScreen if not signed in, App if signed in.
+//
+// To avoid a flash of the login screen on every refresh for signed-in users,
+// we store a lightweight hint in localStorage. If the hint says a user was
+// previously signed in, we show a spinner and wait for Firebase to confirm.
+// If no hint (new device / signed out), we show the login screen immediately.
+// The hint is set/cleared inside onAuthStateChanged so it stays in sync.
+
+const AUTH_HINT_KEY = "mtg-has-user";
 
 function Root() {
-  const [user, setUser] = useState(undefined); // undefined=loading, null=signed out, object=signed in
+  const [user, setUser] = useState(() =>
+    localStorage.getItem(AUTH_HINT_KEY) ? undefined : null
+  );
 
   useEffect(() => {
-    // Safety net: if Firebase scripts are slow to load (cold cache, slow network),
-    // onAuthStateChanged may not fire for a long time. After 3 s, assume signed-out
-    // so the user sees the login screen rather than a frozen spinner.
-    const timeout = setTimeout(() => setUser(u => u === undefined ? null : u), 3000);
-    const unsub = auth.onAuthStateChanged(u => { clearTimeout(timeout); setUser(u); });
-    return () => { clearTimeout(timeout); unsub(); };
+    const unsub = auth.onAuthStateChanged(u => {
+      if (u) localStorage.setItem(AUTH_HINT_KEY, "1");
+      else    localStorage.removeItem(AUTH_HINT_KEY);
+      setUser(u);
+    });
+    return unsub;
   }, []);
 
   if (user === undefined) {
