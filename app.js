@@ -133,6 +133,56 @@ function fmtTimeAgo(ts) {
   return fmtDateLong(new Date(ts).toISOString().slice(0, 10));
 }
 
+// ─── Test dataset ─────────────────────────────────────────────────────────────
+
+const TEST_MODE_KEY = "mtg-journal-test-mode";
+
+/**
+ * Generates an array of fake match entries using the current formats and goals.
+ * Each goal gets a randomised hit-probability so the heatmap has realistic spread.
+ * Result distribution: ~55% W / ~40% L / ~5% D, spread over the past year.
+ */
+function generateTestData(formats, goals, count) {
+  const n      = count || 200;
+  const active = formats.filter(f => f.active).map(f => f.name);
+  const gActive = goals.filter(g => g.active);
+  if (!active.length) return [];
+
+  // Per-goal hit probability — varies so the heatmap chart looks interesting
+  const goalProbs = {};
+  gActive.forEach(g => { goalProbs[g.id] = 0.38 + Math.random() * 0.52; });
+
+  const now     = Date.now();
+  const oneYear = 365 * 24 * 60 * 60 * 1000;
+  const entries = [];
+
+  for (let i = 0; i < n; i++) {
+    const ts = now - Math.random() * oneYear;
+    const d  = new Date(ts);
+    const date = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+
+    const r = Math.random();
+    let wins, losses;
+    if      (r < 0.55) { wins = 2;   losses = Math.random() < 0.4 ? 1 : 0; }
+    else if (r < 0.95) { losses = 2; wins   = Math.random() < 0.4 ? 1 : 0; }
+    else               { wins = 1;   losses = 1; }
+
+    const goalMap = {};
+    gActive.forEach(g => { goalMap[g.id] = Math.random() < goalProbs[g.id]; });
+
+    entries.push({
+      id:     Math.floor(ts) - i,   // -i ensures uniqueness
+      date,
+      format: active[Math.floor(Math.random() * active.length)],
+      result: calcResult(wins, losses),
+      wins, losses,
+      goals:  goalMap,
+      notes:  "",
+    });
+  }
+  return entries;
+}
+
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
 /**
@@ -317,16 +367,137 @@ function StatsBar({ entries, goalCount }) {
   const avg    = (entries.reduce((s, e) => s + Object.values(e.goals && !Array.isArray(e.goals) ? e.goals : {}).filter(Boolean).length, 0) / entries.length).toFixed(1);
   return React.createElement("div", { className: "stats-grid" },
     [
-      { label: "Matches",   val: entries.length },
-      { label: "Avg goals", val: `${avg}/${goalCount}` },
-      { label: "Wins",      val: wins },
-      { label: "Losses",    val: losses },
-      { label: "Draws",     val: draws },
-      { label: "Win rate",  val: entries.length ? `${Math.round(wins / entries.length * 100)}%` : "—" },
+      { label: "Matches",  val: entries.length },
+      { label: "Avg goals",val: `${avg}/${goalCount}` },
+      { label: "Win rate", val: entries.length ? `${Math.round(wins / entries.length * 100)}%` : "—" },
+      { label: "Wins",     val: wins },
+      { label: "Losses",   val: losses },
+      { label: "Draws",    val: draws },
     ].map(s => React.createElement("div", { key: s.label, className: "stat-card" },
       React.createElement("div", { className: "stat-val" }, s.val),
       React.createElement("div", { className: "stat-label" }, s.label)
     ))
+  );
+}
+
+// ─── Charts ───────────────────────────────────────────────────────────────────
+
+/** SVG line sparkline. data = array of numbers; normalises min–max internally. */
+function Sparkline({ data, stroke }) {
+  if (!data || data.length < 2) return null;
+  const W = 300, H = 56, pad = 5;
+  const min = Math.min(...data), max = Math.max(...data);
+  const range = max - min || 0.001;
+  const toX = i => (i / (data.length - 1)) * W;
+  const toY = v => H - pad - ((v - min) / range) * (H - pad * 2);
+  const pts     = data.map((v, i) => `${toX(i).toFixed(1)},${toY(v).toFixed(1)}`).join(" ");
+  const fillPts = `0,${H} ${pts} ${W},${H}`;
+  const color   = stroke || "var(--accent)";
+  return React.createElement("svg", {
+    viewBox: `0 0 ${W} ${H}`,
+    style: { width: "100%", height: H, display: "block" },
+    preserveAspectRatio: "none",
+  },
+    React.createElement("polygon", { points: fillPts, fill: color, fillOpacity: 0.12 }),
+    React.createElement("polyline", {
+      points: pts, fill: "none", stroke: color, strokeWidth: 1.5,
+      strokeLinejoin: "round", strokeLinecap: "round",
+      style: { vectorEffect: "non-scaling-stroke" },
+    })
+  );
+}
+
+function ChartCard({ title, subtitle, children }) {
+  return React.createElement("div", {
+    style: { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "12px 14px" }
+  },
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 } },
+      React.createElement("span", { style: { fontSize: 11, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: "0.07em" } }, title),
+      subtitle && React.createElement("span", { style: { fontSize: 11, color: "var(--text3)" } }, subtitle),
+    ),
+    children
+  );
+}
+
+/**
+ * Three charts shown in HistoryTab below the stats grid.
+ *   1. Rolling 10-match win rate (line sparkline)
+ *   2. Rolling 10-match avg goals per match (line sparkline)
+ *   4. Per-goal achievement % (horizontal bar heatmap)
+ * Charts 1 & 2 are hidden when fewer than 10 entries are in the filtered set.
+ */
+function ChartsSection({ entries, goals }) {
+  if (!entries.length) return null;
+
+  const sorted     = [...entries].sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.id - b.id);
+  const activeGoals = goals.filter(g => g.active);
+  const WINDOW     = 10;
+
+  // Chart 1 — rolling win rate
+  let rollingWR = null;
+  if (sorted.length >= WINDOW) {
+    rollingWR = [];
+    for (let i = WINDOW - 1; i < sorted.length; i++) {
+      const w = sorted.slice(i - WINDOW + 1, i + 1);
+      rollingWR.push(w.filter(e => e.result === "Win").length / WINDOW);
+    }
+  }
+
+  // Chart 2 — rolling avg goals/match
+  let rollingGoals = null;
+  if (sorted.length >= WINDOW && activeGoals.length) {
+    const vals = sorted.map(e => {
+      const g = e.goals && !Array.isArray(e.goals) ? e.goals : {};
+      return Object.values(g).filter(Boolean).length / activeGoals.length;
+    });
+    rollingGoals = [];
+    for (let i = WINDOW - 1; i < sorted.length; i++) {
+      const w = vals.slice(i - WINDOW + 1, i + 1);
+      rollingGoals.push(w.reduce((s, v) => s + v, 0) / WINDOW);
+    }
+  }
+
+  // Chart 4 — goal achievement heatmap
+  const heatmap = activeGoals.map(goal => {
+    const relevant = entries.filter(e => {
+      const g = e.goals && !Array.isArray(e.goals) ? e.goals : {};
+      return goal.id in g;
+    });
+    const pct = relevant.length ? relevant.filter(e => e.goals[goal.id]).length / relevant.length : 0;
+    return { goal, pct };
+  }).sort((a, b) => b.pct - a.pct);
+
+  const recentWR = rollingWR ? `${Math.round(rollingWR[rollingWR.length - 1] * 100)}% recent` : null;
+  const recentGoals = rollingGoals ? `${Math.round(rollingGoals[rollingGoals.length - 1] * activeGoals.length * 10) / 10} / ${activeGoals.length} recent` : null;
+
+  return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 4 } },
+
+    rollingWR && React.createElement(ChartCard, { title: "Win rate trend", subtitle: `10-match rolling • ${recentWR}` },
+      React.createElement(Sparkline, { data: rollingWR, stroke: "#059669" })
+    ),
+
+    rollingGoals && React.createElement(ChartCard, { title: "Goals per match", subtitle: `10-match rolling • ${recentGoals}` },
+      React.createElement(Sparkline, { data: rollingGoals })
+    ),
+
+    heatmap.length > 0 && React.createElement(ChartCard, { title: "Goal achievement", subtitle: `${entries.length} match${entries.length !== 1 ? "es" : ""}` },
+      React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 7 } },
+        heatmap.map(({ goal, pct }) =>
+          React.createElement("div", { key: goal.id, style: { display: "flex", alignItems: "center", gap: 8 } },
+            React.createElement("span", {
+              style: { fontSize: 12, color: "var(--text2)", width: 110, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+              title: goal.text,
+            }, goal.text),
+            React.createElement("div", { style: { flex: 1, height: 7, background: "var(--surface2)", borderRadius: 4, overflow: "hidden" } },
+              React.createElement("div", { style: { width: `${pct * 100}%`, height: "100%", background: "var(--accent)", borderRadius: 4, transition: "width 0.5s ease" } })
+            ),
+            React.createElement("span", { style: { fontSize: 12, color: "var(--text2)", width: 30, textAlign: "right", flexShrink: 0 } },
+              `${Math.round(pct * 100)}%`
+            )
+          )
+        )
+      )
+    ),
   );
 }
 
@@ -842,6 +1013,7 @@ function HistoryTab({ entries, goals, formats, onOpen }) {
     }, "Clear filters"),
 
     React.createElement(StatsBar, { entries: filtered, goalCount: goals.length }),
+    React.createElement(ChartsSection, { entries: filtered, goals }),
     React.createElement(EntryList, { entries: filtered, onOpen }),
   );
 }
@@ -1157,7 +1329,7 @@ function GoalList({ goals, onChange }) {
 
 // ─── Settings tab ─────────────────────────────────────────────────────────────
 
-function SettingsTab({ settings, onSave, onFormatRename, lastSynced, uid, user }) {
+function SettingsTab({ settings, onSave, onFormatRename, lastSynced, uid, user, testMode, onTestMode }) {
   const [formats,       setFormats]       = useState(settings.formats);
   const [goals,         setGoals]         = useState(settings.goals);
   const [accent,        setAccent]        = useState(settings.accent);
@@ -1268,6 +1440,28 @@ function SettingsTab({ settings, onSave, onFormatRename, lastSynced, uid, user }
       ),
       lastSynced && React.createElement("div", { style: { marginTop: 6, fontSize: 12, color: "var(--text3)" } },
         `Last loaded from cloud: ${fmtTimeAgo(lastSynced)}`
+      )
+    ),
+
+    React.createElement("div", null,
+      React.createElement(SectionLabel, null, "Test mode"),
+      React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginBottom: 10 } },
+        "Load ~200 generated entries to preview stats and charts. Your real data is untouched."
+      ),
+      React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+        React.createElement("span", { style: { fontSize: 13, color: testMode ? "#D97706" : "var(--text2)", fontWeight: testMode ? 600 : 400 } },
+          testMode ? "Active — showing generated data" : "Inactive"
+        ),
+        React.createElement(ToggleSwitch, {
+          checked: !!testMode,
+          onChange: () => {
+            if (testMode) {
+              onTestMode(false, null);
+            } else {
+              onTestMode(true, generateTestData(formats, goals, 200));
+            }
+          },
+        })
       )
     ),
 
@@ -1537,6 +1731,7 @@ function App({ uid, user }) {
   const [syncing,     setSyncing]     = useState(false);
   const [error,       setError]       = useState(null);
   const [lastSynced,  setLastSynced]  = useState(null);   // Unix timestamp of last successful sync
+  const [testMode,    setTestMode]    = useState(() => localStorage.getItem(TEST_MODE_KEY) === "true");
   const indicatorRef = useRef(null);
 
   // Android back gesture: push a history entry when entering a detail/form view
@@ -1558,10 +1753,34 @@ function App({ uid, user }) {
   /** Updates entries in React state and the localStorage cache atomically. */
   const setAndCache = updated => { setEntries(updated); cacheSave(updated); };
 
+  /** Toggles test mode on/off. When enabling, `data` is the generated entries array. */
+  const handleTestMode = (enable, data) => {
+    if (enable) {
+      const sorted = data.sort((a, b) => b.id - a.id);
+      cacheSave(sorted);
+      setEntries(sorted);
+      localStorage.setItem(TEST_MODE_KEY, "true");
+      setTestMode(true);
+    } else {
+      localStorage.removeItem(TEST_MODE_KEY);
+      setTestMode(false);
+      setSyncing(true);
+      firestoreGet(uid)
+        .then(({ entries: d }) => {
+          const sorted = d.map(e => ({ ...e, date: String(e.date).slice(0, 10) })).sort((a, b) => b.id - a.id);
+          setAndCache(sorted);
+        })
+        .catch(() => {})
+        .finally(() => setSyncing(false));
+    }
+  };
+
   // On mount: apply theme, show cached data immediately if available, then sync
   // from the sheet in the background and merge any sheet settings.
+  // Skips Firestore sync when test mode is active.
   useEffect(() => {
     applyTheme(settings.accent, settings.darkMode);
+    if (localStorage.getItem(TEST_MODE_KEY) === "true") { setLoading(false); return; }
     const hasCached = cacheLoad().length > 0;
     if (hasCached) setLoading(false);
     setSyncing(true);
@@ -1686,10 +1905,18 @@ function App({ uid, user }) {
     // ── Tabs view ──
     view === "tabs" && React.createElement("div", { style: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 } },
 
+      testMode && React.createElement("div", {
+        style: {
+          background: "#D97706", color: "#fff", fontSize: 12, fontWeight: 600,
+          textAlign: "center", padding: "5px 12px", borderRadius: "var(--radius-sm)",
+          marginBottom: 10, letterSpacing: "0.03em",
+        }
+      }, "TEST DATA — not your real matches"),
+
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.14"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.15"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
@@ -1722,6 +1949,8 @@ function App({ uid, user }) {
                 lastSynced,
                 uid,
                 user,
+                testMode,
+                onTestMode: handleTestMode,
               })
             )
           )
