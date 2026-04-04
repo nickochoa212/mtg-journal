@@ -682,10 +682,10 @@ function TabSlider({ tab, setTab, setDailyDate, indicatorRef, children }) {
 
 // ─── Scroll panel ─────────────────────────────────────────────────────────────
 // Wraps a scrollable tab panel with pull-to-refresh and bottom-overscroll bounce.
-// PTR: drag down at top ≥ 64px → location.reload().
+// PTR: drag down at top ≥ 64px → calls onRefresh() (soft data re-fetch, no reload).
 // Bounce: at bottom, try to scroll further → brief spring animation on content.
 
-function ScrollPanel({ children, style }) {
+function ScrollPanel({ children, style, onRefresh }) {
   const elRef    = useRef(null);
   const innerRef = useRef(null);
   const ptrRef   = useRef(null);
@@ -754,8 +754,17 @@ function ScrollPanel({ children, style }) {
     const onTouchEnd = () => {
       if (mode === 'ptr') {
         if (pullY >= PTR_THRESHOLD) {
-          ptr.textContent = 'Refreshing…';
-          setTimeout(() => location.reload(), 400);
+          ptr.textContent = '↻ Refreshing…';
+          inner.style.transition = 'transform 0.3s cubic-bezier(0.25,0.46,0.45,0.94)';
+          inner.style.transform  = '';
+          ptr.style.transition   = 'opacity 0.3s';
+          setTimeout(() => {
+            ptr.style.opacity  = '0';
+            ptr.style.transform = 'translateY(-44px)';
+            inner.style.transition = '';
+            ptr.style.transition   = '';
+            if (onRefresh) onRefresh();
+          }, 300);
         } else {
           inner.style.transition = 'transform 0.3s cubic-bezier(0.25,0.46,0.45,0.94)';
           ptr.style.transition   = 'transform 0.3s, opacity 0.3s';
@@ -1759,6 +1768,26 @@ function App({ uid, user }) {
   /** Updates entries in React state and the localStorage cache atomically. */
   const setAndCache = updated => { setEntries(updated); cacheSave(updated); };
 
+  /** Re-fetches entries and settings from Firestore without a full page reload. */
+  const handleRefresh = () => {
+    if (localStorage.getItem(TEST_MODE_KEY) === "true") return; // no-op in test mode
+    setSyncing(true);
+    firestoreGet(uid)
+      .then(({ entries: data, settings: cloudSettings }) => {
+        const sorted = data.map(e => ({ ...e, date: String(e.date).slice(0, 10) })).sort((a, b) => b.id - a.id);
+        setAndCache(sorted);
+        if (cloudSettings) {
+          const merged = { ...loadSettings(), ...cloudSettings };
+          saveSettings(merged);
+          setSettings(merged);
+          applyTheme(merged.accent, merged.darkMode);
+        }
+        setLastSynced(Date.now());
+      })
+      .catch(() => setError("Refresh failed. Check your connection."))
+      .finally(() => setSyncing(false));
+  };
+
   /** Toggles test mode on/off. When enabling, `data` is the generated entries array. */
   const handleTestMode = (enable, data) => {
     if (enable) {
@@ -1922,7 +1951,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.20"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.21"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
@@ -1932,7 +1961,7 @@ function App({ uid, user }) {
       loading
         ? React.createElement(Spinner)
         : React.createElement(TabSlider, { tab, setTab: changeTab, setDailyDate, indicatorRef },
-            React.createElement(ScrollPanel, { style: { minWidth: "100%", width: "100%", height: "100%", padding: "0 8px env(safe-area-inset-bottom, 16px)" } },
+            React.createElement(ScrollPanel, { style: { minWidth: "100%", width: "100%", height: "100%", padding: "0 8px env(safe-area-inset-bottom, 16px)" }, onRefresh: handleRefresh },
               React.createElement(DailyTab, {
                 entries, goals, date: dailyDate, settings,
                 isActive: tab === "Daily",
@@ -1941,13 +1970,13 @@ function App({ uid, user }) {
                 onFormatChange: handleFormatChange,
               })
             ),
-            React.createElement(ScrollPanel, { style: { minWidth: "100%", width: "100%", height: "100%", padding: "0 8px env(safe-area-inset-bottom, 16px)" } },
+            React.createElement(ScrollPanel, { style: { minWidth: "100%", width: "100%", height: "100%", padding: "0 8px env(safe-area-inset-bottom, 16px)" }, onRefresh: handleRefresh },
               React.createElement(HistoryTab, {
                 entries, goals, formats,
                 onOpen: entry => { setSelected(entry); setView("edit"); },
               })
             ),
-            React.createElement(ScrollPanel, { style: { minWidth: "100%", width: "100%", height: "100%", padding: "0 8px env(safe-area-inset-bottom, 16px)" } },
+            React.createElement(ScrollPanel, { style: { minWidth: "100%", width: "100%", height: "100%", padding: "0 8px env(safe-area-inset-bottom, 16px)" }, onRefresh: handleRefresh },
               React.createElement(SettingsTab, {
                 settings,
                 onSave: s => setSettings(s),
