@@ -189,7 +189,7 @@ function cacheSave(entries) {
 // ─── Firestore API ────────────────────────────────────────────────────────────
 
 const entriesCol  = uid => db.collection(`mtg-journal/${uid}/entries`);
-const settingsDoc = uid => db.doc(`mtg-journal/${uid}/settings`);
+const settingsDoc = uid => db.doc(`mtg-journal/${uid}/config/settings`);
 
 /** Loads all entries and settings from Firestore for the signed-in user. */
 async function firestoreGet(uid) {
