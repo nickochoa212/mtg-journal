@@ -72,7 +72,7 @@
     html, body {
       background: var(--bg); color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 16px; line-height: 1.5; min-height: 100vh;
+      font-size: 16px; line-height: 1.5; height: 100%; overflow: hidden;
       -webkit-font-smoothing: antialiased;
       transition: background 0.5s, color 0.5s;
     }
@@ -83,7 +83,7 @@
       transition: background 0.5s, border-color 0.5s, color 0.5s;
     }
 
-    .app { max-width: 560px; margin: 0 auto; padding: 24px 16px env(safe-area-inset-bottom, 16px); }
+    .app { max-width: 560px; margin: 0 auto; padding: 24px 16px 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
     h1 { font-size: 22px; font-weight: 700; color: var(--text); letter-spacing: -0.02em; white-space: nowrap; }
     p  { font-size: 13px; color: var(--text2); margin-top: 2px; }
 

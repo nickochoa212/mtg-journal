@@ -471,7 +471,7 @@ function TabSlider({ tab, setTab, setDailyDate, indicatorRef, children }) {
   };
 
   return React.createElement("div", {
-    style: { overflow: "hidden", width: "100%" },
+    style: { overflow: "hidden", width: "100%", flex: 1, minHeight: 0 },
     onTouchStart, onTouchMove, onTouchEnd,
   },
     React.createElement("div", {
@@ -479,6 +479,7 @@ function TabSlider({ tab, setTab, setDailyDate, indicatorRef, children }) {
       style: {
         display: "flex",
         width: "100%",
+        height: "100%",
         transform: `translateX(-${tabIdx * 100}%)`,
         transition: "transform 0.3s cubic-bezier(0.32,0.72,0,1)",
         willChange: "transform",
@@ -553,6 +554,8 @@ function DailyTab({ entries, goals, date, onOpen, onSave, settings, onFormatChan
     },
       React.createElement(EntryList, { entries: dayEntries, onOpen })
     ),
+    // Spacer so the last item isn't hidden behind the fixed Log Entry bar
+    React.createElement("div", { style: { height: 72 } }),
   );
 }
 
@@ -1287,8 +1290,6 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onF
         rows: 3,
       })
     ),
-    // Spacer so content doesn't hide behind the fixed action bar
-    React.createElement("div", { style: { height: 72 } }),
 
     ReactDOM.createPortal(
       React.createElement("div", {
@@ -1526,12 +1527,12 @@ function App({ uid, user }) {
     ),
 
     // ── Tabs view ──
-    view === "tabs" && React.createElement(React.Fragment, null,
+    view === "tabs" && React.createElement("div", { style: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 } },
 
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.7"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.8"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
@@ -1541,7 +1542,7 @@ function App({ uid, user }) {
       loading
         ? React.createElement(Spinner)
         : React.createElement(TabSlider, { tab, setTab: changeTab, setDailyDate, indicatorRef },
-            React.createElement("div", { style: { minWidth: "100%", width: "100%", padding: "0 8px" } },
+            React.createElement("div", { style: { minWidth: "100%", width: "100%", height: "100%", overflowY: "auto", WebkitOverflowScrolling: "touch", padding: "0 8px env(safe-area-inset-bottom, 16px)" } },
               React.createElement(DailyTab, {
                 entries, goals, date: dailyDate, settings,
                 isActive: tab === "Daily",
@@ -1550,13 +1551,13 @@ function App({ uid, user }) {
                 onFormatChange: handleFormatChange,
               })
             ),
-            React.createElement("div", { style: { minWidth: "100%", width: "100%", padding: "0 8px" } },
+            React.createElement("div", { style: { minWidth: "100%", width: "100%", height: "100%", overflowY: "auto", WebkitOverflowScrolling: "touch", padding: "0 8px env(safe-area-inset-bottom, 16px)" } },
               React.createElement(HistoryTab, {
                 entries, goals, formats,
                 onOpen: entry => { setSelected(entry); setView("detail"); },
               })
             ),
-            React.createElement("div", { style: { minWidth: "100%", width: "100%", padding: "0 8px" } },
+            React.createElement("div", { style: { minWidth: "100%", width: "100%", height: "100%", overflowY: "auto", WebkitOverflowScrolling: "touch", padding: "0 8px env(safe-area-inset-bottom, 16px)" } },
               React.createElement(SettingsTab, {
                 settings,
                 onSave: s => setSettings(s),
@@ -1571,23 +1572,26 @@ function App({ uid, user }) {
 
 
     // ── Entry detail ──
-    view === "detail" && selected && React.createElement(DetailView, {
-      entry: selected, goals,
-      onBack:   () => { setSelected(null); setView("tabs"); },
-      onEdit:   () => setView("edit"),
-      onDelete: deleteEntry,
-    }),
+    view === "detail" && selected && React.createElement("div", { style: { flex: 1, overflowY: "auto", minHeight: 0, padding: "0 0 env(safe-area-inset-bottom, 16px)" } },
+      React.createElement(DetailView, {
+        entry: selected, goals,
+        onBack:   () => { setSelected(null); setView("tabs"); },
+        onEdit:   () => setView("edit"),
+        onDelete: deleteEntry,
+      })
+    ),
 
     // ── Edit entry ──
-    view === "edit" && selected && React.createElement(React.Fragment, null,
+    view === "edit" && selected && React.createElement("div", { style: { flex: 1, overflowY: "auto", minHeight: 0, padding: "0 0 env(safe-area-inset-bottom, 16px)" } },
       React.createElement("div", { style: { marginBottom: 20 } },
         React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "Edit entry")
       ),
       React.createElement(LogForm, {
-        initial: selected, settings, isEdit: true,
+        initial: selected, settings, isEdit: true, isActive: true,
         onSave: saveEdit, onCancel: () => setView("detail"),
         onFormatChange: handleFormatChange,
-      })
+      }),
+      React.createElement("div", { style: { height: 72 } })
     )
   );
 }
