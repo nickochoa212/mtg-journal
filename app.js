@@ -37,7 +37,7 @@ const DEFAULT_FORMATS = [
   { name: "Cube",           active: true },
 ];
 
-const TABS = ["Daily", "History", "Settings"];
+const TABS = ["Daily", "History", "Decks", "Settings"];
 
 // Shared result styling used by Badge, HistoryTab filter pills, and LogForm.
 // `border` is the accent ring color for the selected state on interactive pills.
@@ -70,6 +70,8 @@ const ACCENT_OPTIONS = [
   { key: "rose",     label: "Rose",     color: "#E11D48" },
   { key: "brown",    label: "Brown",    color: "#92400E" },
 ];
+
+const ARCHETYPE_OPTIONS = ["Aggro", "Midrange", "Control", "Combo"];
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -264,6 +266,18 @@ function cacheSave(entries) {
   try { localStorage.setItem(CACHE_KEY, JSON.stringify(entries)); } catch {}
 }
 
+const DECK_CACHE_KEY = "mtg-journal-decks-cache";
+
+/** Loads the decks cache from localStorage. Returns [] on parse error. */
+function deckCacheLoad() {
+  try { return JSON.parse(localStorage.getItem(DECK_CACHE_KEY) || "[]"); } catch { return []; }
+}
+
+/** Saves decks to the localStorage cache. */
+function deckCacheSave(decks) {
+  try { localStorage.setItem(DECK_CACHE_KEY, JSON.stringify(decks)); } catch {}
+}
+
 // ─── Firestore API ────────────────────────────────────────────────────────────
 
 const entriesCol  = uid => db.collection(`mtg-journal/${uid}/entries`);
@@ -294,6 +308,24 @@ async function firestoreRemove(uid, id) {
 /** Saves the settings document for the signed-in user. */
 async function firestoreSaveSettings(uid, s) {
   await settingsDoc(uid).set(s);
+}
+
+const decksCol = uid => db.collection(`mtg-journal/${uid}/decks`);
+
+/** Loads all decks from Firestore for the signed-in user. */
+async function firestoreGetDecks(uid) {
+  const snap = await decksCol(uid).get();
+  return snap.docs.map(d => d.data());
+}
+
+/** Creates or overwrites a single deck document. */
+async function firestoreUpsertDeck(uid, deck) {
+  await decksCol(uid).doc(String(deck.id)).set(deck);
+}
+
+/** Deletes a deck document by id. */
+async function firestoreRemoveDeck(uid, id) {
+  await decksCol(uid).doc(String(id)).delete();
 }
 
 
@@ -526,7 +558,7 @@ function LogMatchButton({ onClick }) {
 
 // ─── Entry card ───────────────────────────────────────────────────────────────
 
-function EntryCard({ entry, onOpen }) {
+function EntryCard({ entry, onOpen, decks }) {
   const entryGoals = normalizeGoals(entry.goals);
   const score = Object.values(entryGoals).filter(Boolean).length;
   const total = Object.keys(entryGoals).length;
@@ -534,10 +566,12 @@ function EntryCard({ entry, onOpen }) {
   const hasScore = entry.wins != null && entry.losses != null;
   const resultLabel = hasScore ? `${entry.result} — ${entry.wins}/${entry.losses}` : entry.result;
   const s = RESULT_STYLE[entry.result] || { background: "var(--surface2)", color: "var(--text2)" };
+  const deckObj = decks && entry.deck ? decks.find(d => String(d.id) === String(entry.deck)) : null;
   return React.createElement("div", { onClick: () => onOpen(entry), className: "entry-card" },
     React.createElement("div", { style: { flex: 1, minWidth: 0 } },
       React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 5, flexWrap: "wrap" } },
         React.createElement("span", { style: { fontWeight: 600, fontSize: 14, color: "var(--text)" } }, entry.format),
+        deckObj && React.createElement("span", { style: { fontSize: 12, color: "var(--text2)" } }, deckObj.name),
         entry.result && React.createElement("span", {
           style: { fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 6, letterSpacing: "0.04em", ...s }
         }, resultLabel),
@@ -555,10 +589,34 @@ function EntryCard({ entry, onOpen }) {
   );
 }
 
-function EntryList({ entries, onOpen }) {
+function EntryList({ entries, onOpen, decks }) {
   if (!entries.length) return React.createElement("div", { className: "empty-state" }, "No entries here yet.");
   return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } },
-    entries.map(e => React.createElement(EntryCard, { key: e.id, entry: e, onOpen }))
+    entries.map(e => React.createElement(EntryCard, { key: e.id, entry: e, onOpen, decks }))
+  );
+}
+
+// ─── Deck card ────────────────────────────────────────────────────────────────
+
+/** Card for a single deck displayed in the Decks tab list. */
+function DeckCard({ deck, onEdit }) {
+  return React.createElement("div", { onClick: () => onEdit(deck), className: "entry-card", style: { opacity: deck.active ? 1 : 0.55 } },
+    React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: (deck.archetypes?.length || deck.variant) ? 5 : 0, flexWrap: "wrap" } },
+        React.createElement("span", { style: { fontWeight: 600, fontSize: 14, color: "var(--text)", textDecoration: deck.active ? "none" : "line-through" } },
+          deck.name || "Unnamed"
+        ),
+        deck.variant && React.createElement("span", { style: { fontSize: 12, color: "var(--text2)" } }, deck.variant),
+        React.createElement("span", { style: { fontSize: 12, color: "var(--text3)", marginLeft: "auto", flexShrink: 0 } }, deck.format || ""),
+      ),
+      deck.archetypes?.length > 0 && React.createElement("div", { style: { display: "flex", gap: 4, flexWrap: "wrap" } },
+        deck.archetypes.map(a => React.createElement("span", {
+          key: a,
+          style: { fontSize: 11, fontWeight: 600, padding: "1px 7px", borderRadius: 5, background: "var(--accent-light)", color: "var(--accent-text)" }
+        }, a))
+      )
+    ),
+    React.createElement("span", { style: { fontSize: 18, color: "var(--text3)", flexShrink: 0 } }, "›")
   );
 }
 
@@ -890,7 +948,7 @@ function DateNav({ date, onChange }) {
 // which remounts LogForm with fresh state. Changing the date also resets the
 // form so the default date stays in sync with the day navigator.
 
-function DailyTab({ entries, goals, date, onOpen, onSave, settings, onFormatChange, isActive }) {
+function DailyTab({ entries, goals, date, onOpen, onSave, settings, decks, onFormatChange, isActive }) {
   const [formKey, setFormKey] = useState(0);
   const dayEntries = entries.filter(e => e.date === date).sort((a, b) => b.id - a.id);
 
@@ -903,6 +961,7 @@ function DailyTab({ entries, goals, date, onOpen, onSave, settings, onFormatChan
     React.createElement(LogForm, {
       key: `${formKey}-${date}`,
       settings,
+      decks,
       defaultDate: date,
       onSave: handleSave,
       onFormatChange,
@@ -911,7 +970,7 @@ function DailyTab({ entries, goals, date, onOpen, onSave, settings, onFormatChan
     dayEntries.length > 0 && React.createElement("div", {
       style: { borderTop: "1px solid var(--border)", paddingTop: 16 }
     },
-      React.createElement(EntryList, { entries: dayEntries, onOpen })
+      React.createElement(EntryList, { entries: dayEntries, onOpen, decks })
     ),
     // Spacer so the last item isn't hidden behind the fixed Log Entry bar
     React.createElement("div", { style: { height: 72 } }),
@@ -1005,7 +1064,7 @@ function groupEntries(arr, groupKey) {
   });
 }
 
-function HistoryTab({ entries, goals, formats, onOpen }) {
+function HistoryTab({ entries, goals, formats, decks, onOpen }) {
   const [selectedFormats, setSelectedFormats] = useState([]);
   const [results,         setResults]         = useState([]);
   const [datePreset,      setDatePreset]      = useState("All time");
@@ -1173,7 +1232,7 @@ function HistoryTab({ entries, goals, formats, onOpen }) {
 
     // Entry list — flat or grouped
     groupKey === "none"
-      ? React.createElement(EntryList, { entries: sorted, onOpen })
+      ? React.createElement(EntryList, { entries: sorted, onOpen, decks })
       : groups.map(g => React.createElement("div", { key: g.label },
           React.createElement("div", {
             style: {
@@ -1186,7 +1245,7 @@ function HistoryTab({ entries, goals, formats, onOpen }) {
             React.createElement("span", null, g.label),
             React.createElement("span", { style: { fontWeight: 400, fontSize: 11 } }, g.entries.length)
           ),
-          React.createElement(EntryList, { entries: g.entries, onOpen })
+          React.createElement(EntryList, { entries: g.entries, onOpen, decks })
         ))
   );
 }
@@ -1495,6 +1554,193 @@ function GoalList({ goals, onChange }) {
   );
 }
 
+// ─── Deck form ────────────────────────────────────────────────────────────────
+
+/**
+ * Full-page form for creating or editing a Deck.
+ * Uses the same portal bottom-action-bar pattern as LogForm.
+ */
+function DeckForm({ initial, settings, onSave, onCancel, isEdit, isActive = true }) {
+  const activeFormats = settings.formats.filter(f => f.active).map(f => f.name);
+
+  const [form, setForm] = useState(initial ? { ...initial } : {
+    name: "", variant: "", format: activeFormats[0] || "",
+    archetypes: [], notes: "", active: true,
+  });
+  const [validationError, setValidationError] = useState("");
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const toggleArchetype = a => set("archetypes",
+    (form.archetypes || []).includes(a)
+      ? form.archetypes.filter(x => x !== a)
+      : [...(form.archetypes || []), a]
+  );
+
+  const handleSave = () => {
+    if (!form.name?.trim()) { setValidationError("Deck name is required."); return; }
+    onSave({ ...form, name: form.name.trim(), variant: (form.variant || "").trim() });
+  };
+
+  return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 20 } },
+
+    // Format + Deck name row
+    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
+      React.createElement("div", { className: "field" },
+        React.createElement("label", null, "Format"),
+        React.createElement("select", { value: form.format, onChange: e => set("format", e.target.value) },
+          activeFormats.map(f => React.createElement("option", { key: f }, f))
+        )
+      ),
+      React.createElement("div", { className: "field" },
+        React.createElement("label", null, "Deck name"),
+        React.createElement("input", {
+          type: "text", value: form.name || "", placeholder: "e.g. Cycling Storm",
+          onChange: e => set("name", e.target.value),
+        })
+      )
+    ),
+
+    // Variant
+    React.createElement("div", { className: "field" },
+      React.createElement("label", null, "Deck variant"),
+      React.createElement("input", {
+        type: "text", value: form.variant || "", placeholder: "e.g. Budget build (optional)",
+        onChange: e => set("variant", e.target.value),
+      })
+    ),
+
+    // Archetype multi-select pills
+    React.createElement("div", { className: "field" },
+      React.createElement("label", null, "Archetype"),
+      React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+        ARCHETYPE_OPTIONS.map(a => {
+          const active = (form.archetypes || []).includes(a);
+          return React.createElement("button", {
+            key: a, onClick: () => toggleArchetype(a),
+            style: {
+              padding: "6px 14px", borderRadius: 20, fontSize: 13, fontWeight: 500,
+              cursor: "pointer", transition: "all 0.12s",
+              ...(active
+                ? { background: "var(--accent-light)", color: "var(--accent-text)", border: "1.5px solid var(--accent)" }
+                : { background: "var(--surface)", color: "var(--text2)", border: "1px solid var(--border)" }),
+            }
+          }, a);
+        })
+      )
+    ),
+
+    // Notes
+    React.createElement("div", { className: "field" },
+      React.createElement("label", null, "Notes"),
+      React.createElement("textarea", {
+        value: form.notes || "",
+        onChange: e => set("notes", e.target.value),
+        placeholder: "Deck notes, strategy, card choices…",
+        rows: 3,
+      })
+    ),
+
+    // Active toggle
+    React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+      React.createElement("span", { style: { fontSize: 14, color: "var(--text)" } }, "Active"),
+      React.createElement(ToggleSwitch, { checked: form.active !== false, onChange: () => set("active", !form.active) })
+    ),
+
+    // Fixed bottom action bar (portal)
+    ReactDOM.createPortal(
+      React.createElement("div", {
+        style: {
+          position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 200,
+          background: "var(--surface)", borderTop: "1px solid var(--border)",
+          padding: `12px 16px calc(12px + env(safe-area-inset-bottom, 0px))`,
+          transform: isActive ? "translateY(0)" : "translateY(110%)",
+          transition: "transform 0.55s cubic-bezier(0.32,0.72,0,1)",
+        }
+      },
+        React.createElement("div", { style: { maxWidth: 560, margin: "0 auto", display: "flex", gap: 10, alignItems: "center" } },
+          validationError && React.createElement("span", { style: { flex: 1, fontSize: 13, color: "#dc2626" } }, validationError),
+          onCancel && React.createElement("button", { className: "btn-ghost", onClick: onCancel, style: { flex: validationError ? "none" : 1 } }, "Cancel"),
+          React.createElement("button", { className: "btn-primary", onClick: handleSave, style: { flex: onCancel ? 2 : 1 } },
+            isEdit ? "Save changes" : "Add deck"
+          )
+        )
+      ),
+      document.body
+    )
+  );
+}
+
+// ─── Decks tab ────────────────────────────────────────────────────────────────
+
+/**
+ * Lists all decks sorted newest-first (by dateCreated).
+ * A toggle groups them by format in the order defined in settings.
+ */
+function DecksTab({ decks, settings, onEdit, onAdd }) {
+  const [groupByFormat, setGroupByFormat] = useState(false);
+
+  const sorted = [...decks].sort((a, b) => (b.dateCreated || b.id) - (a.dateCreated || a.id));
+
+  let content;
+  if (groupByFormat && sorted.length > 0) {
+    // Group by format, ordered by settings.formats then any extras
+    const fmtOrder = settings.formats.map(f => f.name);
+    const byFormat = new Map();
+    sorted.forEach(d => {
+      const key = d.format || "Unknown";
+      if (!byFormat.has(key)) byFormat.set(key, []);
+      byFormat.get(key).push(d);
+    });
+    const keys = [
+      ...fmtOrder.filter(k => byFormat.has(k)),
+      ...[...byFormat.keys()].filter(k => !fmtOrder.includes(k)),
+    ];
+    content = keys.map(k =>
+      React.createElement("div", { key: k },
+        React.createElement("div", {
+          style: {
+            fontSize: 11, fontWeight: 700, color: "var(--text2)",
+            textTransform: "uppercase", letterSpacing: "0.08em",
+            padding: "8px 0 6px", borderBottom: "1px solid var(--border)", marginBottom: 8,
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+          }
+        },
+          React.createElement("span", null, k),
+          React.createElement("span", { style: { fontWeight: 400 } }, byFormat.get(k).length)
+        ),
+        React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } },
+          byFormat.get(k).map(d => React.createElement(DeckCard, { key: d.id, deck: d, onEdit }))
+        )
+      )
+    );
+  } else {
+    content = sorted.length === 0
+      ? React.createElement("div", { className: "empty-state" }, "No decks yet. Add your first deck!")
+      : React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } },
+          sorted.map(d => React.createElement(DeckCard, { key: d.id, deck: d, onEdit }))
+        );
+  }
+
+  return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
+    React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 } },
+      React.createElement("button", {
+        onClick: () => setGroupByFormat(v => !v),
+        style: {
+          fontSize: 13, padding: "6px 12px",
+          background: groupByFormat ? "var(--accent-light)" : "var(--surface)",
+          color: groupByFormat ? "var(--accent-text)" : "var(--text2)",
+          border: groupByFormat ? "1.5px solid var(--accent)" : "1px solid var(--border)",
+          borderRadius: "var(--radius-sm)", cursor: "pointer",
+        }
+      }, "Group by format"),
+      React.createElement("button", { className: "btn-primary", onClick: onAdd, style: { fontSize: 13, padding: "6px 12px" } }, "+ Add deck")
+    ),
+    content,
+    React.createElement("div", { style: { height: 72 } }),
+  );
+}
+
 // ─── Settings tab ─────────────────────────────────────────────────────────────
 
 function SettingsTab({ settings, onSave, onFormatRename, lastSynced, uid, user, testMode, onTestMode }) {
@@ -1648,7 +1894,7 @@ function SettingsTab({ settings, onSave, onFormatRename, lastSynced, uid, user, 
  * For legacy entries being edited (no stored wins/losses), sensible defaults
  * are inferred from the stored result string.
  */
-function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onFormatChange, isActive = true }) {
+function LogForm({ initial, settings, decks, defaultDate, onSave, onCancel, isEdit, onFormatChange, isActive = true }) {
   const activeFormats = settings.formats.filter(f => f.active).map(f => f.name);
   const activeGoals   = settings.goals.filter(g => g.active);
 
@@ -1677,10 +1923,13 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onF
     : 1;
 
   const [form, setForm] = useState(initial
-    ? { ...initial, goals: initGoalsMap(), wins: defaultWins, losses: defaultLosses }
-    : { date: defaultDate || todayStr(), format: defaultFormat, notes: "", goals: initGoalsMap(), wins: 0, losses: 0 }
+    ? { ...initial, deck: initial.deck || "", goals: initGoalsMap(), wins: defaultWins, losses: defaultLosses }
+    : { date: defaultDate || todayStr(), format: defaultFormat, deck: "", notes: "", goals: initGoalsMap(), wins: 0, losses: 0 }
   );
   const [validationError, setValidationError] = useState("");
+
+  // Decks active for the currently selected format — used by the Deck dropdown.
+  const availableDecks = (decks || []).filter(d => d.active && d.format === form.format);
 
   const result = calcResult(form.wins, form.losses);
 
@@ -1689,8 +1938,15 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onF
   };
 
   const set = (k, v) => {
-    setForm(f => ({ ...f, [k]: v }));
-    // Side-effect: persist the selected format as the new default for future entries
+    setForm(f => {
+      const next = { ...f, [k]: v };
+      // When format changes, clear deck selection if it no longer matches the new format
+      if (k === "format" && f.deck) {
+        const valid = (decks || []).some(d => d.active && String(d.id) === String(f.deck) && d.format === v);
+        if (!valid) next.deck = "";
+      }
+      return next;
+    });
     if (k === "format") onFormatChange(v);
     if (k === "date") setValidationError("");
   };
@@ -1737,13 +1993,16 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onF
         )
       ),
       React.createElement("div", { className: "field" },
-        React.createElement("label", null, "Date"),
-        React.createElement("input", {
-          type: "date", value: form.date,
-          max: todayStr(),
-          onKeyDown: e => e.preventDefault(),
-          onChange: e => { if (e.target.value) set("date", e.target.value); },
-        })
+        React.createElement("label", null, "Deck"),
+        React.createElement("select", {
+          value: form.deck || "",
+          onChange: e => set("deck", e.target.value),
+        },
+          React.createElement("option", { value: "" }, "— None —"),
+          ...availableDecks.map(d => React.createElement("option", { key: d.id, value: String(d.id) },
+            d.name + (d.variant ? ` (${d.variant})` : "")
+          ))
+        )
       )
     ),
 
@@ -1763,17 +2022,24 @@ function LogForm({ initial, settings, defaultDate, onSave, onCancel, isEdit, onF
       )
     ),
 
-    // Auto-calculated result display
-    React.createElement("div", { className: "field" },
-      React.createElement("label", null, "Result"),
-      React.createElement("div", { style: { display: "flex", alignItems: "center" } },
-        React.createElement("span", {
-          style: {
-            fontSize: 14, fontWeight: 600, padding: "8px 16px",
-            borderRadius: "var(--radius-sm)",
-            ...resultStyle,
-          }
-        }, `${result} — ${form.wins}/${form.losses}`)
+    // Auto-calculated result and date
+    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
+      React.createElement("div", { className: "field" },
+        React.createElement("label", null, "Result"),
+        React.createElement("div", { style: { display: "flex", alignItems: "center" } },
+          React.createElement("span", {
+            style: { fontSize: 14, fontWeight: 600, padding: "8px 12px", borderRadius: "var(--radius-sm)", whiteSpace: "nowrap", ...resultStyle }
+          }, `${result} — ${form.wins}/${form.losses}`)
+        )
+      ),
+      React.createElement("div", { className: "field" },
+        React.createElement("label", null, "Date"),
+        React.createElement("input", {
+          type: "date", value: form.date,
+          max: todayStr(),
+          onKeyDown: e => e.preventDefault(),
+          onChange: e => { if (e.target.value) set("date", e.target.value); },
+        })
       )
     ),
 
@@ -1844,9 +2110,11 @@ function App({ uid, user }) {
   const [settings,    setSettings]    = useState(loadSettings);
   const [entries,     setEntries]     = useState(() => cacheLoad().sort((a, b) => b.id - a.id));
   const [tab,         setTab]         = useState("Daily");
-  const [view,        setView]        = useState("tabs");  // "tabs" | "edit"
+  const [view,        setView]        = useState("tabs");  // "tabs" | "edit" | "deckEdit"
   const [dailyDate,   setDailyDate]   = useState(todayStr);
-  const [selected,    setSelected]    = useState(null);   // the entry open in detail/edit view
+  const [selected,    setSelected]    = useState(null);   // the entry open in edit view
+  const [decks,       setDecks]       = useState(() => deckCacheLoad());
+  const [selectedDeck, setSelectedDeck] = useState(null); // the deck open in deckEdit view
   const [loading,     setLoading]     = useState(true);   // true only on first load when cache is empty
   const [syncing,     setSyncing]     = useState(false);
   const historyScrollRef = useRef(null);   // ref to the History ScrollPanel's scroll element
@@ -1865,8 +2133,9 @@ function App({ uid, user }) {
 
   useEffect(() => {
     const handler = () => {
-      if      (view === "log")  setView("tabs");
-      else if (view === "edit") { setSelected(null); setView("tabs"); }
+      if      (view === "log")      setView("tabs");
+      else if (view === "edit")     { setSelected(null); setView("tabs"); }
+      else if (view === "deckEdit") { setSelectedDeck(null); setView("tabs"); }
     };
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);
@@ -1875,12 +2144,15 @@ function App({ uid, user }) {
   /** Updates entries in React state and the localStorage cache atomically. */
   const setAndCache = updated => { setEntries(updated); cacheSave(updated); };
 
-  /** Re-fetches entries and settings from Firestore without a full page reload. */
+  /** Updates decks in React state and the localStorage cache atomically. */
+  const setAndCacheDecks = updated => { setDecks(updated); deckCacheSave(updated); };
+
+  /** Re-fetches entries, settings, and decks from Firestore without a full page reload. */
   const handleRefresh = () => {
     if (localStorage.getItem(TEST_MODE_KEY) === "true") return; // no-op in test mode
     setSyncing(true);
-    firestoreGet(uid)
-      .then(({ entries: data, settings: cloudSettings }) => {
+    Promise.all([firestoreGet(uid), firestoreGetDecks(uid)])
+      .then(([{ entries: data, settings: cloudSettings }, deckData]) => {
         const sorted = data.map(e => ({ ...e, date: String(e.date).slice(0, 10) })).sort((a, b) => b.id - a.id);
         setAndCache(sorted);
         if (cloudSettings) {
@@ -1890,6 +2162,7 @@ function App({ uid, user }) {
           applyTheme(merged.accent, merged.darkMode);
         }
         setLastSynced(Date.now());
+        setAndCacheDecks(deckData.sort((a, b) => (b.dateCreated || b.id) - (a.dateCreated || a.id)));
       })
       .catch(() => setError("Refresh failed. Check your connection."))
       .finally(() => setSyncing(false));
@@ -1926,8 +2199,8 @@ function App({ uid, user }) {
     const hasCached = cacheLoad().length > 0;
     if (hasCached) setLoading(false);
     setSyncing(true);
-    firestoreGet(uid)
-      .then(({ entries: data, settings: cloudSettings }) => {
+    Promise.all([firestoreGet(uid), firestoreGetDecks(uid)])
+      .then(([{ entries: data, settings: cloudSettings }, deckData]) => {
         const sorted = data
           .map(e => ({ ...e, date: String(e.date).slice(0, 10) }))
           .sort((a, b) => b.id - a.id);
@@ -1939,6 +2212,7 @@ function App({ uid, user }) {
           applyTheme(merged.accent, merged.darkMode);
         }
         setLastSynced(Date.now());
+        setAndCacheDecks(deckData.sort((a, b) => (b.dateCreated || b.id) - (a.dateCreated || a.id)));
       })
       .catch(() => {
         if (!hasCached) setError("Couldn't load entries from Firestore.");
@@ -2012,6 +2286,32 @@ function App({ uid, user }) {
     });
   };
 
+  const saveNewDeck = deck => {
+    setError(null);
+    const saved = { ...deck, id: Date.now(), dateCreated: Date.now() };
+    setAndCacheDecks([saved, ...decks]);
+    setView("tabs");
+    if (!testMode) firestoreUpsertDeck(uid, saved).catch(() => setError("Deck saved locally but sync failed."));
+  };
+
+  const saveDeckEdit = deck => {
+    setError(null);
+    const updated = { ...deck, id: selectedDeck.id, dateCreated: selectedDeck.dateCreated };
+    setAndCacheDecks(decks.map(d => d.id === selectedDeck.id ? updated : d));
+    setSelectedDeck(null);
+    setView("tabs");
+    if (!testMode) firestoreUpsertDeck(uid, updated).catch(() => setError("Deck saved locally but sync failed."));
+  };
+
+  const deleteDeck = () => {
+    setError(null);
+    const id = selectedDeck.id;
+    setAndCacheDecks(decks.filter(d => d.id !== id));
+    setSelectedDeck(null);
+    setView("tabs");
+    if (!testMode) firestoreRemoveDeck(uid, id).catch(() => setError("Deck deleted locally but sync failed."));
+  };
+
   const { formats, goals } = settings;
 
   return React.createElement("div", { className: "app" },
@@ -2058,7 +2358,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.1.29"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.2.0"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
@@ -2070,7 +2370,7 @@ function App({ uid, user }) {
         : React.createElement(TabSlider, { tab, setTab: changeTab, setDailyDate, indicatorRef },
             React.createElement(ScrollPanel, { style: { minWidth: "100%", width: "100%", height: "100%", padding: "0 8px env(safe-area-inset-bottom, 16px)" }, onRefresh: handleRefresh },
               React.createElement(DailyTab, {
-                entries, goals, date: dailyDate, settings,
+                entries, goals, date: dailyDate, settings, decks,
                 isActive: tab === "Daily",
                 onOpen: entry => { setSelected(entry); setView("edit"); },
                 onSave: saveNew,
@@ -2079,8 +2379,15 @@ function App({ uid, user }) {
             ),
             React.createElement(ScrollPanel, { style: { minWidth: "100%", width: "100%", height: "100%", padding: "0 8px calc(env(safe-area-inset-bottom, 0px) + 48px)" }, onRefresh: handleRefresh, scrollRef: historyScrollRef, onScroll: pos => setHistoryScrolled(pos > 200) },
               React.createElement(HistoryTab, {
-                entries, goals, formats,
+                entries, goals, formats, decks,
                 onOpen: entry => { setSelected(entry); setView("edit"); },
+              })
+            ),
+            React.createElement(ScrollPanel, { style: { minWidth: "100%", width: "100%", height: "100%", padding: "0 8px calc(env(safe-area-inset-bottom, 0px) + 48px)" }, onRefresh: handleRefresh },
+              React.createElement(DecksTab, {
+                decks, settings,
+                onEdit: deck => { setSelectedDeck(deck); setView("deckEdit"); },
+                onAdd:  ()   => { setSelectedDeck(null); setView("deckEdit"); },
               })
             ),
             React.createElement(ScrollPanel, { style: { minWidth: "100%", width: "100%", height: "100%", padding: "0 8px calc(env(safe-area-inset-bottom, 0px) + 48px)" }, onRefresh: handleRefresh },
@@ -2131,9 +2438,30 @@ function App({ uid, user }) {
         }, "Delete")
       ),
       React.createElement(LogForm, {
-        initial: selected, settings, isEdit: true, isActive: true,
+        initial: selected, settings, decks, isEdit: true, isActive: true,
         onSave: saveEdit, onCancel: () => { setSelected(null); setView("tabs"); },
         onFormatChange: handleFormatChange,
+      }),
+      React.createElement("div", { style: { height: 72 } })
+    ),
+
+    // ── Deck edit / new deck ──
+    view === "deckEdit" && React.createElement("div", { style: { flex: 1, overflowY: "auto", minHeight: 0, padding: "0 8px env(safe-area-inset-bottom, 16px)" } },
+      React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
+        React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, selectedDeck ? "Edit deck" : "New deck"),
+        selectedDeck && React.createElement("button", {
+          className: "btn-danger",
+          onClick: () => { if (window.confirm("Delete this deck?")) deleteDeck(); },
+          style: { fontSize: 13 },
+        }, "Delete")
+      ),
+      React.createElement(DeckForm, {
+        initial: selectedDeck || undefined,
+        settings,
+        onSave: selectedDeck ? saveDeckEdit : saveNewDeck,
+        onCancel: () => { setSelectedDeck(null); setView("tabs"); },
+        isEdit: !!selectedDeck,
+        isActive: true,
       }),
       React.createElement("div", { style: { height: 72 } })
     )
