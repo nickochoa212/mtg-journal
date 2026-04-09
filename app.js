@@ -219,13 +219,25 @@ function loadSettings() {
     formats = formats.map(f => f.name === "DC" ? { ...f, name: "Duel Commander" } : f);
     return {
       formats,
-      goals:      s.goals      || DEFAULT_GOALS,
-      accent:     s.accent     || "cyan",
-      darkMode:   s.darkMode   || "auto",
-      lastFormat: s.lastFormat || "",
+      goals:             s.goals             || DEFAULT_GOALS,
+      accent:            s.accent            || "cyan",
+      darkMode:          s.darkMode          || "auto",
+      lastFormat:        s.lastFormat        || "",
+      lastDeckByFormat:  s.lastDeckByFormat  || {},
+      showFields: {
+        winsLosses:   s.showFields?.winsLosses   ?? true,
+        goals:        s.showFields?.goals        ?? true,
+        notes:        s.showFields?.notes        ?? true,
+        opponentInfo: s.showFields?.opponentInfo ?? true,
+        mulligans:    s.showFields?.mulligans    ?? true,
+      },
     };
   } catch {
-    return { formats: DEFAULT_FORMATS, goals: DEFAULT_GOALS, accent: "cyan", darkMode: "auto", lastFormat: "" };
+    return {
+      formats: DEFAULT_FORMATS, goals: DEFAULT_GOALS, accent: "cyan", darkMode: "auto",
+      lastFormat: "", lastDeckByFormat: {},
+      showFields: { winsLosses: true, goals: true, notes: true, opponentInfo: true, mulligans: true },
+    };
   }
 }
 
@@ -1595,7 +1607,7 @@ function DeckForm({ initial, settings, onSave, onCancel, isEdit, isActive = true
       React.createElement("div", { className: "field" },
         React.createElement("label", null, "Deck name"),
         React.createElement("input", {
-          type: "text", value: form.name || "", placeholder: "e.g. Cycling Storm",
+          type: "text", value: form.name || "",
           onChange: e => set("name", e.target.value),
         })
       )
@@ -1605,7 +1617,7 @@ function DeckForm({ initial, settings, onSave, onCancel, isEdit, isActive = true
     React.createElement("div", { className: "field" },
       React.createElement("label", null, "Deck variant"),
       React.createElement("input", {
-        type: "text", value: form.variant || "", placeholder: "e.g. Budget build (optional)",
+        type: "text", value: form.variant || "",
         onChange: e => set("variant", e.target.value),
       })
     ),
@@ -1636,7 +1648,6 @@ function DeckForm({ initial, settings, onSave, onCancel, isEdit, isActive = true
       React.createElement("textarea", {
         value: form.notes || "",
         onChange: e => set("notes", e.target.value),
-        placeholder: "Deck notes, strategy, card choices…",
         rows: 3,
       })
     ),
@@ -1680,7 +1691,11 @@ function DeckForm({ initial, settings, onSave, onCancel, isEdit, isActive = true
 function DecksTab({ decks, settings, onEdit, onAdd }) {
   const [groupByFormat, setGroupByFormat] = useState(false);
 
-  const sorted = [...decks].sort((a, b) => (b.dateCreated || b.id) - (a.dateCreated || a.id));
+  const sorted = [...decks].sort((a, b) => {
+    const aA = a.active !== false, bA = b.active !== false;
+    if (aA !== bA) return aA ? -1 : 1;
+    return (b.dateCreated || b.id) - (a.dateCreated || a.id);
+  });
 
   let content;
   if (groupByFormat && sorted.length > 0) {
@@ -1748,6 +1763,7 @@ function SettingsTab({ settings, onSave, onFormatRename, lastSynced, uid, user, 
   const [goals,         setGoals]         = useState(settings.goals);
   const [accent,        setAccent]        = useState(settings.accent);
   const [darkMode,      setDarkMode]      = useState(settings.darkMode);
+  const [showFields,    setShowFields]    = useState(settings.showFields || { winsLosses: true, goals: true, notes: true, opponentInfo: true, mulligans: true });
   const [newFmt,        setNewFmt]        = useState("");
   const mounted = useRef(false);
 
@@ -1757,11 +1773,13 @@ function SettingsTab({ settings, onSave, onFormatRename, lastSynced, uid, user, 
   // Skips the initial mount so we don't overwrite settings that just loaded.
   useEffect(() => {
     if (!mounted.current) { mounted.current = true; return; }
-    const s = { ...settings, formats, goals, accent, darkMode };
+    const s = { ...settings, formats, goals, accent, darkMode, showFields };
     saveSettings(s);
     onSave(s);
     firestoreSaveSettings(uid, s).catch(() => {});
-  }, [formats, goals, accent, darkMode]);
+  }, [formats, goals, accent, darkMode, showFields]);
+
+  const toggleField = key => setShowFields(f => ({ ...f, [key]: !f[key] }));
 
   const addFormat = () => {
     const v = newFmt.trim();
@@ -1809,6 +1827,28 @@ function SettingsTab({ settings, onSave, onFormatRename, lastSynced, uid, user, 
           onClick: () => { if (window.confirm("Reset goals to defaults?")) setGoals(DEFAULT_GOALS); },
           style: { fontSize: 12, color: "var(--text3)", background: "none", border: "none", cursor: "pointer", padding: "4px 0" }
         }, "Reset to defaults")
+      )
+    ),
+
+    React.createElement("div", null,
+      React.createElement(SectionLabel, null, "Logging"),
+      React.createElement("p", { style: { fontSize: 12, color: "var(--text3)", marginBottom: 10 } },
+        "Toggle sections on/off in the log entry form."
+      ),
+      [
+        { key: "winsLosses",   label: "Wins / Losses" },
+        { key: "goals",        label: "Mental game goals" },
+        { key: "notes",        label: "Notes" },
+        { key: "opponentInfo", label: "Opponent name & deck" },
+        { key: "mulligans",    label: "Mulligans" },
+      ].map(({ key, label }) =>
+        React.createElement("div", {
+          key,
+          style: { display: "flex", alignItems: "center", justifyContent: "space-between", paddingBottom: 10 },
+        },
+          React.createElement("span", { style: { fontSize: 14, color: "var(--text)" } }, label),
+          React.createElement(ToggleSwitch, { checked: showFields[key] !== false, onChange: () => toggleField(key) })
+        )
       )
     ),
 
@@ -1904,6 +1944,11 @@ function LogForm({ initial, settings, decks, defaultDate, onSave, onCancel, isEd
     ? initial.format
     : (activeFormats.includes(settings.lastFormat) ? settings.lastFormat : activeFormats[0] || "");
 
+  // Pick default deck: last-used deck for the default format, if still active.
+  const lastDeckId = settings.lastDeckByFormat?.[defaultFormat] || "";
+  const defaultDeck = !initial && (decks || []).some(d => d.active && d.format === defaultFormat && String(d.id) === String(lastDeckId))
+    ? lastDeckId : "";
+
   // Build initial goals map from active goals, seeding from any saved values.
   const initGoalsMap = () => {
     const map = {};
@@ -1923,8 +1968,30 @@ function LogForm({ initial, settings, decks, defaultDate, onSave, onCancel, isEd
     : 1;
 
   const [form, setForm] = useState(initial
-    ? { ...initial, deck: initial.deck || "", goals: initGoalsMap(), wins: defaultWins, losses: defaultLosses }
-    : { date: defaultDate || todayStr(), format: defaultFormat, deck: "", notes: "", goals: initGoalsMap(), wins: 0, losses: 0 }
+    ? {
+        ...initial,
+        deck: initial.deck || "",
+        goals: initGoalsMap(),
+        wins: defaultWins,
+        losses: defaultLosses,
+        dieRoll:      initial.dieRoll      ?? null,
+        opponentName: initial.opponentName ?? "",
+        opponentDeck: initial.opponentDeck ?? "",
+        mulligans:    initial.mulligans    ?? { g1: null, g2: null, g3: null },
+      }
+    : {
+        date: defaultDate || todayStr(),
+        format: defaultFormat,
+        deck: defaultDeck,
+        notes: "",
+        goals: initGoalsMap(),
+        wins: 0,
+        losses: 0,
+        dieRoll: null,
+        opponentName: "",
+        opponentDeck: "",
+        mulligans: { g1: null, g2: null, g3: null },
+      }
   );
   const [validationError, setValidationError] = useState("");
 
@@ -1940,15 +2007,23 @@ function LogForm({ initial, settings, decks, defaultDate, onSave, onCancel, isEd
   const set = (k, v) => {
     setForm(f => {
       const next = { ...f, [k]: v };
-      // When format changes, clear deck selection if it no longer matches the new format
-      if (k === "format" && f.deck) {
-        const valid = (decks || []).some(d => d.active && String(d.id) === String(f.deck) && d.format === v);
-        if (!valid) next.deck = "";
+      // When format changes, update deck to last-used for new format (or clear)
+      if (k === "format") {
+        const valid = f.deck && (decks || []).some(d => d.active && String(d.id) === String(f.deck) && d.format === v);
+        if (!valid) {
+          const lastForFormat = settings.lastDeckByFormat?.[v] || "";
+          const lastValid = lastForFormat && (decks || []).some(d => d.active && d.format === v && String(d.id) === String(lastForFormat));
+          next.deck = lastValid ? lastForFormat : "";
+        }
       }
       return next;
     });
     if (k === "format") onFormatChange(v);
     if (k === "date") setValidationError("");
+  };
+
+  const setMulligan = (game, val) => {
+    setForm(f => ({ ...f, mulligans: { ...f.mulligans, [game]: val } }));
   };
 
   const score = Object.values(form.goals).filter(Boolean).length;
@@ -2006,8 +2081,8 @@ function LogForm({ initial, settings, decks, defaultDate, onSave, onCancel, isEd
       )
     ),
 
-    // Wins / Losses selectors
-    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
+    // Wins / Losses selectors (conditional)
+    settings.showFields?.winsLosses !== false && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
       React.createElement("div", { className: "field" },
         React.createElement("label", null, "Wins"),
         React.createElement("div", { style: { display: "flex", gap: 6 } },
@@ -2024,7 +2099,7 @@ function LogForm({ initial, settings, decks, defaultDate, onSave, onCancel, isEd
 
     // Auto-calculated result and date
     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
-      React.createElement("div", { className: "field" },
+      settings.showFields?.winsLosses !== false && React.createElement("div", { className: "field" },
         React.createElement("label", null, "Result"),
         React.createElement("div", { style: { display: "flex", alignItems: "center" } },
           React.createElement("span", {
@@ -2043,7 +2118,66 @@ function LogForm({ initial, settings, decks, defaultDate, onSave, onCancel, isEd
       )
     ),
 
-    React.createElement("div", { className: "goals-box" },
+    // Die roll (always shown)
+    React.createElement("div", { className: "field" },
+      React.createElement("label", null, "Die roll"),
+      React.createElement("div", { style: { display: "flex", gap: 6 } },
+        ["Win", "Loss"].map(v =>
+          React.createElement("button", {
+            key: v,
+            onClick: () => set("dieRoll", form.dieRoll === v ? null : v),
+            style: {
+              flex: 1, padding: "10px 0", fontWeight: 600, fontSize: 14,
+              borderRadius: "var(--radius-sm)",
+              border: form.dieRoll === v ? `2px solid var(--accent)` : "1.5px solid var(--border)",
+              background: form.dieRoll === v ? "var(--accent-light)" : "var(--surface)",
+              color: form.dieRoll === v ? "var(--accent-text)" : "var(--text2)",
+              cursor: "pointer", transition: "all 0.12s",
+            }
+          }, v)
+        )
+      )
+    ),
+
+    // Opponent info (conditional)
+    settings.showFields?.opponentInfo !== false && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } },
+      React.createElement("div", { className: "field" },
+        React.createElement("label", null, "Opponent name"),
+        React.createElement("input", {
+          type: "text", value: form.opponentName || "",
+          onChange: e => set("opponentName", e.target.value),
+        })
+      ),
+      React.createElement("div", { className: "field" },
+        React.createElement("label", null, "Opponent deck"),
+        React.createElement("input", {
+          type: "text", value: form.opponentDeck || "",
+          onChange: e => set("opponentDeck", e.target.value),
+        })
+      )
+    ),
+
+    // Mulligans (conditional)
+    settings.showFields?.mulligans !== false && React.createElement("div", { className: "field" },
+      React.createElement("label", null, "Mulligans"),
+      React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 } },
+        ["g1", "g2", "g3"].map(game =>
+          React.createElement("div", { key: game, className: "field", style: { margin: 0 } },
+            React.createElement("label", { style: { fontSize: 12 } }, game.toUpperCase()),
+            React.createElement("select", {
+              value: form.mulligans?.[game] ?? "",
+              onChange: e => setMulligan(game, e.target.value === "" ? null : Number(e.target.value)),
+            },
+              React.createElement("option", { value: "" }, "—"),
+              [6, 5, 4, 3, 2].map(n => React.createElement("option", { key: n, value: n }, n))
+            )
+          )
+        )
+      )
+    ),
+
+    // Goals (conditional)
+    settings.showFields?.goals !== false && React.createElement("div", { className: "goals-box" },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 } },
         React.createElement("span", { style: { fontWeight: 600, fontSize: 14, color: "var(--text)" } }, "Mental game goals"),
         React.createElement("span", { style: { fontSize: 12, color: "var(--text2)" } }, `${score}/${activeGoals.length}`)
@@ -2066,12 +2200,13 @@ function LogForm({ initial, settings, decks, defaultDate, onSave, onCancel, isEd
         )
       )
     ),
-    React.createElement("div", { className: "field" },
+
+    // Notes (conditional)
+    settings.showFields?.notes !== false && React.createElement("div", { className: "field" },
       React.createElement("label", null, "Notes"),
       React.createElement("textarea", {
         value: form.notes,
         onChange: e => set("notes", e.target.value),
-        placeholder: "Deck played, notable moments, things to remember...",
         rows: 3,
       })
     ),
@@ -2254,10 +2389,19 @@ function App({ uid, user }) {
   // sync in the background. A visible error is shown if the sync fails, but the
   // local change is kept — it will be in sync after the next successful apiGet.
 
+  const updateLastDeck = form => {
+    if (form.deck) {
+      const updatedSettings = { ...settings, lastDeckByFormat: { ...settings.lastDeckByFormat, [form.format]: form.deck } };
+      saveSettings(updatedSettings);
+      setSettings(updatedSettings);
+    }
+  };
+
   const saveNew = async form => {
     setError(null);
     const entry = { ...form, id: Date.now() };
     setAndCache([entry, ...entries]);
+    updateLastDeck(form);
     setView("tabs");
     if (!testMode) firestoreUpsert(uid, entry).catch(() => {
       setError("Saved locally but Firestore sync failed.");
@@ -2268,6 +2412,7 @@ function App({ uid, user }) {
     setError(null);
     const updated = { ...form, id: selected.id };
     setAndCache(entries.map(e => e.id === selected.id ? updated : e));
+    updateLastDeck(form);
     setSelected(null);
     setView("tabs");
     if (!testMode) firestoreUpsert(uid, updated).catch(() => {
@@ -2358,7 +2503,7 @@ function App({ uid, user }) {
       React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
           React.createElement("h1", { style: { margin: 0, color: "var(--text)" } }, "MTG Journal"),
-          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.2.0"),
+          React.createElement("span", { style: { fontSize: 11, color: "var(--text3)", fontWeight: 500 } }, "v1.3.0"),
         ),
         React.createElement(DateNav, { date: dailyDate, onChange: setDailyDate })
       ),
